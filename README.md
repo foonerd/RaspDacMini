@@ -334,7 +334,7 @@ Contributions are welcome! Please submit issues or pull requests to the reposito
 ## Support
 
 For issues and support:
-* GitHub Issues: https://github.com/foonerd/raspdac_mini_lcd/issues
+* GitHub Issues: https://github.com/foonerd/RaspDacMini/issues
 * Volumio Forum: https://community.volumio.com/
 
 ## Changelog
