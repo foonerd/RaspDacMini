@@ -29,14 +29,33 @@ Display driver plugin for Audiophonics RaspDacMini with 2.4" LCD (320x240) on Vo
 
 ## Installation
 
-### Via Volumio Plugin System
+### Via Volumio Plugin Store (Future)
 
-1. Download the plugin ZIP file
-2. Navigate to Volumio UI: Plugins -> Plugin Manager -> Upload Plugin
-3. Upload the ZIP file
+Once submitted and approved:
+1. Navigate to Plugins -> Search
+2. Search for "RaspDacMini LCD"
+3. Click Install
+4. **IMPORTANT: Reboot your system** for device tree overlay to load
+5. After reboot, enable the plugin via: Plugins -> Installed Plugins -> RaspDacMini LCD
+
+### Manual Installation (Development/Testing)
+
+1. SSH into your Volumio system
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/foonerd/RaspDacMini --depth=1
+   cd RaspDacMini
+   ```
+3. Install the plugin:
+   ```bash
+   volumio plugin install
+   ```
 4. Wait for installation to complete (may take several minutes)
-5. **IMPORTANT: Reboot your system** for device tree overlay to load
-6. After reboot, enable the plugin via: Plugins -> Installed Plugins -> RaspDacMini LCD
+5. **IMPORTANT: Reboot your system** for device tree overlay to load:
+   ```bash
+   sudo reboot
+   ```
+6. After reboot, enable the plugin via Volumio UI: Plugins -> Installed Plugins -> RaspDacMini LCD
 
 ### Installation Process
 
