@@ -6,6 +6,8 @@ Display driver plugin for Audiophonics RaspDacMini with 2.4" LCD (320x240) on Vo
 
 * Audiophonics RaspDacMini
 * Display: ZJY240S0800TG02 (ILI9341 controller)
+* IR Receiver: GPIO 4 (optional, for remote control)
+* Remote: Audiophonics ApEvo 38kHz (14 buttons)
 * Raspberry Pi 3/4/5 (ARM architecture: armhf or arm64)
 * GPIO Configuration: DC=27, RESET=24, LED=18
 
@@ -17,6 +19,8 @@ Display driver plugin for Audiophonics RaspDacMini with 2.4" LCD (320x240) on Vo
 * Scrolling text with easing animation
 * Volume and playback state indicators
 * Configurable screen timeout
+* IR remote control support (Audiophonics ApEvo remote)
+* Prebuilt compositor packages for fast installation
 * Node.js 20 compatible
 * Real-time socket.io integration with Volumio
 
@@ -99,6 +103,56 @@ Access plugin settings via Volumio UI: Plugins -> Installed Plugins -> RaspDacMi
 
 * **Restart LCD Service**: Restart the display service to apply changes
 
+## Remote Control
+
+The plugin includes support for the Audiophonics ApEvo IR remote control with custom LIRC implementation to avoid system service conflicts.
+
+### Button Mappings
+
+| Button | Function |
+|--------|----------|
+| Play | Play/Pause toggle |
+| Previous (left) | Previous track |
+| Next (right) | Next track |
+| Left arrow (playleft) | Seek backward (hold) |
+| Right arrow (playright) | Seek forward (hold) |
+| Volume + | Volume up |
+| Volume - | Volume down |
+| Mute | Mute toggle |
+| OK | Stop playback |
+
+### LIRC Implementation
+
+The plugin uses custom systemd services to prevent conflicts with system LIRC:
+
+- **rdm_remote.service** - Custom lircd daemon using plugin configs
+- **rdm_irexec.service** - Button handler executing Volumio commands
+- **System services masked** - lircd.service and lircd.socket disabled
+
+All LIRC configurations are stored in the plugin directory, not /etc/lirc/.
+
+### Testing Remote
+
+After installation and reboot:
+
+```bash
+# Check custom LIRC service status
+systemctl status rdm_remote.service
+systemctl status rdm_irexec.service
+
+# Check if LIRC is receiving signals
+irw
+
+# Press buttons on remote - you should see output like:
+# 0198b847 00 play ApEvo
+# 019858a7 00 playright ApEvo
+```
+
+If no output, check:
+- IR receiver wiring (GPIO 4)
+- dtoverlay=gpio-ir,gpio_pin=4 in /boot/userconfig.txt
+- lircd-setup.service completed successfully
+
 ## Architecture
 
 ### Layer Overview
@@ -126,10 +180,17 @@ raspdac_mini_lcd/
 ├── PREBUILT.md                       # Guide for creating prebuilt archives
 ├── i18n/                             # Translation files
 │   └── strings_en.json               # English translations
-├── assets/                           # Binary assets and prebuilts
+├── assets/                           # Binary assets and configuration files
 │   ├── raspdac-mini-lcd.dtbo         # Device tree overlay (user must add)
+│   ├── lircd.conf                    # LIRC remote control configuration
+│   ├── lircrc                        # Remote button to command mappings
+│   ├── lirc_options.conf             # LIRC daemon configuration
 │   ├── README.txt                    # Assets folder documentation
 │   └── compositor-*.tar.gz           # Optional prebuilts (armv7l/aarch64)
+├── lirc/                             # LIRC runtime (created during install)
+│   ├── lircd.conf                    # Remote button codes (from assets)
+│   ├── lircrc                        # Button command mappings (from assets)
+│   └── lirc_options.conf             # Daemon config (from assets)
 ├── compositor/                       # Display rendering engine
 │   ├── index.js                      # Main compositor (798 lines)
 │   ├── package.json                  # Compositor dependencies
@@ -139,7 +200,6 @@ raspdac_mini_lcd/
 │   │   └── SERVICE_DOCUMENTATION.txt # Service configuration guide
 │   └── utils/                        # Compositor utility modules
 │       ├── volumiolistener.js        # Volumio socket.io integration
-│       ├── moodelistener.js          # moOde listener (not used)
 │       ├── scroll_animation.js       # Easing functions for scrolling
 │       ├── panicmeter.js             # Write collision detection
 │       ├── upnp_albumart_fallback.js # Album art fallback logic
@@ -365,6 +425,35 @@ For issues and support:
 * Volumio Forum: https://community.volumio.com/
 
 ## Changelog
+
+### Version 1.0.1 (2025-10-28)
+
+**LIRC Remote Control & Installation Improvements**
+
+* Added full LIRC support for Audiophonics ApEvo remote control
+  - Custom rdm_remote.service and rdm_irexec.service to prevent conflicts
+  - System lircd.service and lircd.socket masked during installation
+  - All LIRC configs stored in plugin directory (not /etc/lirc/)
+  - Architecture-specific plugin paths (armhf/arm64)
+* Improved button mappings
+  - Left/Right arrows: Previous/Next track
+  - Play Left/Right: Seek backward/forward (hold)
+  - Volume controls with repeat support
+  - Background execution for all commands
+* Installation robustness
+  - Device tree overlay made optional (warns instead of aborting)
+  - Clear warning message with download link if dtbo missing
+  - Prebuilt compositor detection for faster installation
+  - Better error handling and cleanup
+* Uninstall improvements
+  - Removes GPIO IR overlay from /boot/userconfig.txt
+  - Unmasks system LIRC services
+  - Complete cleanup of custom services
+* Documentation updates
+  - Complete LIRC implementation details
+  - Service architecture documentation
+  - Updated directory structure with lirc/ runtime folder
+  - Expanded testing procedures
 
 ### Version 1.0.0 (2025-10-27)
 

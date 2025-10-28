@@ -134,36 +134,119 @@ echo "Installing device tree overlay..."
 
 # Check if dtoverlay file exists in assets
 if [ ! -f "$PLUGIN_DIR/assets/raspdac-mini-lcd.dtbo" ]; then
-    echo "Error: Device tree overlay not found in assets/"
-    echo "Please add raspdac-mini-lcd.dtbo to the assets/ folder"
-    cleanup_on_error
-fi
-
-# Copy dtoverlay to /boot/overlays/
-cp "$PLUGIN_DIR/assets/raspdac-mini-lcd.dtbo" /boot/overlays/
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to copy device tree overlay"
-    cleanup_on_error
-fi
-
-echo "Device tree overlay installed successfully"
-
-echo "Configuring boot parameters..."
-
-# Add dtoverlay to /boot/userconfig.txt if not already present
-if ! grep -q "dtoverlay=raspdac-mini-lcd" /boot/userconfig.txt 2>/dev/null; then
-    echo "" >> /boot/userconfig.txt
-    echo "# RaspDacMini LCD Display" >> /boot/userconfig.txt
-    echo "dtoverlay=raspdac-mini-lcd" >> /boot/userconfig.txt
-    echo "Boot configuration updated"
+    echo "=========================================="
+    echo "WARNING: Device tree overlay not found"
+    echo "=========================================="
+    echo ""
+    echo "The file raspdac-mini-lcd.dtbo is missing from assets/"
+    echo "Display will NOT work until you:"
+    echo "  1. Download from: https://github.com/foonerd/zjy240s0800tg02-ili9341-dtoverlay"
+    echo "  2. Place raspdac-mini-lcd.dtbo in the assets/ folder"
+    echo "  3. Reinstall or manually copy to /boot/overlays/"
+    echo ""
+    echo "Continuing installation without display overlay..."
+    echo "=========================================="
 else
-    echo "Boot configuration already contains dtoverlay"
+    # Copy dtoverlay to /boot/overlays/
+    cp "$PLUGIN_DIR/assets/raspdac-mini-lcd.dtbo" /boot/overlays/
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to copy device tree overlay"
+        cleanup_on_error
+    fi
+    
+    echo "Device tree overlay installed successfully"
+    
+    # Add dtoverlay to /boot/userconfig.txt if not already present
+    if ! grep -q "dtoverlay=raspdac-mini-lcd" /boot/userconfig.txt 2>/dev/null; then
+        echo "" >> /boot/userconfig.txt
+        echo "# RaspDacMini LCD Display" >> /boot/userconfig.txt
+        echo "dtoverlay=raspdac-mini-lcd" >> /boot/userconfig.txt
+        echo "Boot configuration updated"
+    else
+        echo "Boot configuration already contains dtoverlay"
+    fi
 fi
 
-# Optional: Add GPIO IR overlay if remote control desired (commented by default)
-# if ! grep -q "dtoverlay=gpio-ir" /boot/userconfig.txt 2>/dev/null; then
-#     echo "dtoverlay=gpio-ir,gpio_pin=4" >> /boot/userconfig.txt
-# fi
+# Install and configure LIRC for remote control
+echo "Installing LIRC for remote control..."
+
+# Install LIRC package
+apt-get install -y lirc
+if [ $? -ne 0 ]; then
+    echo "Warning: Failed to install lirc, remote control will not work"
+else
+    echo "LIRC installed successfully"
+    
+    # Disable AND mask system LIRC services to prevent conflicts
+    systemctl disable lircd.service irexec.service lircd.socket 2>/dev/null
+    systemctl stop lircd.service irexec.service lircd.socket 2>/dev/null
+    systemctl mask lircd.service lircd.socket 2>/dev/null
+    echo "System LIRC services disabled and masked"
+    
+    # Create LIRC directory in plugin
+    mkdir -p "$PLUGIN_DIR/lirc"
+    
+    # Copy LIRC configuration files to plugin directory
+    cp "$PLUGIN_DIR/assets/lircd.conf" "$PLUGIN_DIR/lirc/lircd.conf"
+    cp "$PLUGIN_DIR/assets/lircrc" "$PLUGIN_DIR/lirc/lircrc"
+    cp "$PLUGIN_DIR/assets/lirc_options.conf" "$PLUGIN_DIR/lirc/lirc_options.conf"
+    
+    # Detect architecture for plugin path
+    LIRC_ARCH=$(dpkg --print-architecture)
+    if [ "$LIRC_ARCH" = "arm64" ]; then
+        LIRC_PLUGIN_DIR="/usr/lib/aarch64-linux-gnu/lirc/plugins"
+    else
+        LIRC_PLUGIN_DIR="/usr/lib/arm-linux-gnueabihf/lirc/plugins"
+    fi
+    
+    # Update lirc_options.conf with correct plugin path
+    sed -i "s|plugindir = .*|plugindir = $LIRC_PLUGIN_DIR|" "$PLUGIN_DIR/lirc/lirc_options.conf"
+    
+    # Add GPIO IR overlay to boot config
+    if ! grep -q "dtoverlay=gpio-ir" /boot/userconfig.txt 2>/dev/null; then
+        echo "# IR Remote Control (GPIO 4)" >> /boot/userconfig.txt
+        echo "dtoverlay=gpio-ir,gpio_pin=4" >> /boot/userconfig.txt
+        echo "IR overlay configured"
+    fi
+    
+    # Create custom LIRC service (rdm_remote.service)
+    cat > /etc/systemd/system/rdm_remote.service << EOF
+[Unit]
+Description=RaspDacMini LIRC Remote Service
+After=network.target lircd-setup.service
+
+[Service]
+ExecStart=/usr/sbin/lircd -O $PLUGIN_DIR/lirc/lirc_options.conf -o /var/run/lirc/lircd -H default -d /dev/lirc0 -n $PLUGIN_DIR/lirc/lircd.conf
+Type=simple
+User=root
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Create custom irexec service (rdm_irexec.service)
+    cat > /etc/systemd/system/rdm_irexec.service << EOF
+[Unit]
+Description=RaspDacMini LIRC Button Handler
+After=network.target lircd-setup.service rdm_remote.service
+
+[Service]
+ExecStart=/usr/bin/irexec $PLUGIN_DIR/lirc/lircrc
+Type=simple
+User=root
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Enable custom LIRC services
+    systemctl daemon-reload
+    systemctl enable rdm_remote.service rdm_irexec.service
+    
+    echo "LIRC configured with custom services"
+fi
 
 echo "Creating systemd service file..."
 
