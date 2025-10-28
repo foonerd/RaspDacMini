@@ -114,12 +114,16 @@ The plugin includes support for the Audiophonics ApEvo IR remote control with cu
 | Play | Play/Pause toggle |
 | Previous (left) | Previous track |
 | Next (right) | Next track |
-| Left arrow (playleft) | Seek backward (hold) |
-| Right arrow (playright) | Seek forward (hold) |
+| Left arrow (playleft) | Seek backward 10s (hold) |
+| Right arrow (playright) | Seek forward 10s (hold) |
+| Up | Browse sources - scroll up |
+| Down | Browse sources - scroll down |
+| Option (Select) | Browse sources - activate selected |
 | Volume + | Volume up |
 | Volume - | Volume down |
 | Mute | Mute toggle |
 | OK | Stop playback |
+| Power | System shutdown |
 
 ### LIRC Implementation
 

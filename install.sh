@@ -241,6 +241,11 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
 
+    # Install source browser script
+    cp "$PLUGIN_DIR/assets/volumio-browse-source" /usr/local/bin/volumio-browse-source
+    chmod +x /usr/local/bin/volumio-browse-source
+    echo "Source browser script installed"
+    
     # Enable custom LIRC services
     systemctl daemon-reload
     systemctl enable rdm_remote.service rdm_irexec.service

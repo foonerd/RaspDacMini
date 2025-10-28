@@ -83,6 +83,15 @@ if [ -d "$PLUGIN_DIR/lirc" ]; then
     echo "LIRC config directory removed"
 fi
 
+# Remove source browser script
+if [ -f /usr/local/bin/volumio-browse-source ]; then
+    rm -f /usr/local/bin/volumio-browse-source
+    echo "Source browser script removed"
+fi
+
+# Remove temporary state files
+rm -f /tmp/volumio_source_index /tmp/volumio_sources_list 2>/dev/null
+
 systemctl daemon-reload
 
 echo "Removing boot configuration..."

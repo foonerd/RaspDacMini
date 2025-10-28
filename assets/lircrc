@@ -72,3 +72,35 @@ begin
   config = /usr/local/bin/volumio stop &
 end
 
+# Browse sources - scroll up
+begin
+  prog = irexec
+  button = up
+  config = /usr/local/bin/volumio-browse-source next &
+  repeat = 3
+end
+
+# Browse sources - scroll down
+begin
+  prog = irexec
+  button = down
+  config = /usr/local/bin/volumio-browse-source prev &
+  repeat = 3
+end
+
+# Browse sources - select/activate
+begin
+  prog = irexec
+  button = option
+  config = /usr/local/bin/volumio-browse-source select &
+  repeat = 0
+end
+
+# System shutdown
+begin
+  prog = irexec
+  button = poweroff
+  config = /sbin/shutdown -h now
+  repeat = 0
+end
+
