@@ -317,10 +317,21 @@ streamer.on("line5", (data)=>{ updateMetaDataText(data, 7, 395, 20) } );
 streamer.on("line6", (data)=>{ updateMetaDataText(data, 7, 420, 20) } );
 streamer.on("coverChange", (data)=>{
 	if(data === cover.src) return; // ne pas recharger l'image actuelle
+	if(!data || typeof data !== 'string') {
+		console.warn('[Album Art] Invalid cover data received');
+		return;
+	}
 	cover.imageData = new ImageData(320,240);
 	cover.src = data;
 	loadImage( data ).then((img)=>{updateCover(img,data)})
-	.catch(	err => { console.warn('Erreur lors du chargement de la couverture.', err)	} ); // il faudrait un fallback cover ici
+	.catch(	err => { 
+		console.warn('Erreur lors du chargement de la couverture.', err.message || err);
+		// Provide black fallback to prevent crash
+		coverctx.fillStyle = "black";
+		coverctx.fillRect(0, 0, 320, 240);
+		cover.imageData = coverctx.getImageData(0, 0, 320, 240);
+		cover.need_redraw = true;
+	});
 });
 streamer.on("directCoverChange", directUpdateCover);
 streamer.on("trackChange", (data)=>{
@@ -657,27 +668,32 @@ function updateFB(){
 	if(busy) return panicmeter.registerError();
 	busy = true;
 
-	Vdraw();
-  
-  if(! display.redrawzones.length) return fbcb();
-  display.redrawzones = [];
-  
-  // console.log("draw")
-  
- 
-	const buff = canvas.toBuffer("raw");
+	try {
+		Vdraw();
+	  
+		if(! display.redrawzones.length) return fbcb();
+		display.redrawzones = [];
+		
+		// console.log("draw")
+		
+	 
+		const buff = canvas.toBuffer("raw");
 
-  const converted = colorConvert.rgb888ToRgb565(buff);
-  
-    streamFile.cork()
-    write(converted);
-    process.nextTick(() =>{
-    streamFile.uncork();
-     process.nextTick(()=>{
-       fbcb()
-     })
-    
-  });
+		const converted = colorConvert.rgb888ToRgb565(buff);
+		
+		streamFile.cork()
+		write(converted);
+		process.nextTick(() =>{
+		streamFile.uncork();
+		 process.nextTick(()=>{
+		   fbcb()
+		 })
+		
+		});
+	} catch(err) {
+		console.warn('[Render] Error in updateFB:', err.message);
+		busy = false;
+	}
   
   
 }
