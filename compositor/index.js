@@ -724,6 +724,23 @@ const streamFile = fs.createWriteStream(targetBuffer);
   process.exit()
 })
 
+// Show startup message while waiting for Volumio connection
+function drawStartupMessage() {
+	ctx.fillStyle = "black";
+	ctx.fillRect(0, 0, 320, 240);
+	ctx.fillStyle = "white";
+	ctx.font = "24px sans-serif";
+	ctx.textAlign = "center";
+	ctx.fillText("Starting...", 160, 120);
+	
+	const buff = canvas.toBuffer("raw");
+	const converted = colorConvert.rgb888ToRgb565(buff);
+	streamFile.write(converted);
+	console.log("[Startup] Displayed startup message");
+}
+
+drawStartupMessage();
+
 
 // Read sleep timeout configuration
 // Priority: 1) Environment variable (from systemd service)
