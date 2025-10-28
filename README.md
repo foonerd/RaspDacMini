@@ -50,12 +50,16 @@ Once submitted and approved:
    ```bash
    volumio plugin install
    ```
-4. Wait for installation to complete (may take several minutes)
+4. Wait for installation to complete
+   - **With prebuilt**: ~10 seconds (no compilation)
+   - **Without prebuilt**: ~15-30 minutes (compiles from source)
 5. **IMPORTANT: Reboot your system** for device tree overlay to load:
    ```bash
    sudo reboot
    ```
 6. After reboot, enable the plugin via Volumio UI: Plugins -> Installed Plugins -> RaspDacMini LCD
+
+**Note:** The installation script automatically detects if a prebuilt compositor exists for your architecture and Node version. If found, it uses the prebuilt (fast). If not found, it compiles from source (slow but works). See [PREBUILT.md](PREBUILT.md) for creating prebuilt archives.
 
 ### Installation Process
 
@@ -110,39 +114,42 @@ Access plugin settings via Volumio UI: Plugins -> Installed Plugins -> RaspDacMi
 
 ```
 raspdac_mini_lcd/
-├── package.json              # Plugin metadata and dependencies
-├── config.json               # Default configuration values
-├── UIConfig.json             # Settings UI definition
-├── index.js                  # Plugin controller (lifecycle management)
-├── install.sh                # POSIX sh installation script
-├── uninstall.sh              # Cleanup script
-├── requiredConf.json         # Hardware requirements
-├── LICENSE                   # GPL-3.0 license
-├── README.md                 # This file
-├── i18n/                     # Translation files
-│   └── strings_en.json       # English translations
-├── assets/                   # Binary assets
-│   └── raspdac-mini-lcd.dtbo # Device tree overlay (user must add)
-├── compositor/               # Display rendering engine
-│   ├── index.js              # Main compositor (798 lines)
-│   ├── package.json          # Compositor dependencies
-│   ├── rdmlcd.sh             # Service startup wrapper
-│   ├── service/              # systemd service files
-│   │   ├── rdmlcd.service    # systemd service definition
+├── package.json                      # Plugin metadata and dependencies
+├── config.json                       # Default configuration values
+├── UIConfig.json                     # Settings UI definition
+├── index.js                          # Plugin controller (lifecycle management)
+├── install.sh                        # POSIX sh installation script
+├── uninstall.sh                      # Cleanup script
+├── requiredConf.json                 # Hardware requirements
+├── LICENSE                           # GPL-3.0 license
+├── README.md                         # This file
+├── PREBUILT.md                       # Guide for creating prebuilt archives
+├── i18n/                             # Translation files
+│   └── strings_en.json               # English translations
+├── assets/                           # Binary assets and prebuilts
+│   ├── raspdac-mini-lcd.dtbo         # Device tree overlay (user must add)
+│   ├── README.txt                    # Assets folder documentation
+│   └── compositor-*.tar.gz           # Optional prebuilts (armv7l/aarch64)
+├── compositor/                       # Display rendering engine
+│   ├── index.js                      # Main compositor (798 lines)
+│   ├── package.json                  # Compositor dependencies
+│   ├── rdmlcd.sh                     # Service startup wrapper
+│   ├── service/                      # systemd service files
+│   │   ├── rdmlcd.service            # systemd service definition
 │   │   └── SERVICE_DOCUMENTATION.txt # Service configuration guide
-│   └── utils/                # Compositor utility modules
-│       ├── volumiolistener.js  # Volumio socket.io integration
-│       ├── moodelistener.js    # moOde listener (not used)
-│       ├── scroll_animation.js # Easing functions for scrolling
-│       ├── panicmeter.js       # Write collision detection
+│   └── utils/                        # Compositor utility modules
+│       ├── volumiolistener.js        # Volumio socket.io integration
+│       ├── moodelistener.js          # moOde listener (not used)
+│       ├── scroll_animation.js       # Easing functions for scrolling
+│       ├── panicmeter.js             # Write collision detection
 │       ├── upnp_albumart_fallback.js # Album art fallback logic
-│       └── rgb565.node         # Native module (built during install)
-└── native/                   # Native C++ modules source
-    └── rgb565/               # Color conversion module
-        ├── rgb565.cpp        # RGBA to BGR565 conversion
-        ├── binding.gyp       # node-gyp build configuration
-        ├── build_rdmlcd.sh   # Build and install script
-        └── package.json      # Native module metadata
+│       └── rgb565.node               # Native module (built during install)
+└── native/                           # Native C++ modules source
+    └── rgb565/                       # Color conversion module
+        ├── rgb565.cpp                # RGBA to BGR565 conversion
+        ├── binding.gyp               # node-gyp build configuration
+        ├── build_rdmlcd.sh           # Build and install script
+        └── package.json              # Native module metadata
 ```
 
 ## Development Status
@@ -240,6 +247,26 @@ Environment Override:
 * Location: /etc/systemd/system/rdmlcd.service.d/override.conf
 * Updated automatically when sleep_after changed in UI
 * Allows runtime configuration without editing service file
+
+### Prebuilt Compositor Archives
+
+To speed up installation on slower systems (especially 1GB RAM Pi boards), the plugin supports prebuilt compositor archives:
+
+**Installation time:**
+* With prebuilt: ~10 seconds
+* Without prebuilt: 15-30 minutes (compilation)
+
+**How it works:**
+1. Install script checks for `assets/compositor-{ARCH}-node{MAJOR}.tar.gz`
+2. If found: Extracts prebuilt, skips build-essential installation
+3. If not found: Installs build tools and compiles from source
+
+**Supported architectures:**
+* `armv7l` - Raspberry Pi 2/3/4 (32-bit OS)
+* `aarch64` - Raspberry Pi 3/4/5 (64-bit OS)
+
+**Creating prebuilts:**
+See [PREBUILT.md](PREBUILT.md) for detailed instructions on creating prebuilt archives for your architecture.
 
 ## Troubleshooting
 

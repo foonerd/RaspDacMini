@@ -58,43 +58,75 @@ fi
 
 echo "System dependencies installed successfully"
 
-echo "Installing compositor npm packages..."
-cd "$COMPOSITOR_DIR"
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to change to compositor directory"
-    cleanup_on_error
+# Detect architecture and Node version for prebuilt check
+ARCH=$(uname -m)
+NODE_MAJOR=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+PREBUILT_FILE="$PLUGIN_DIR/assets/compositor-${ARCH}-node${NODE_MAJOR}.tar.gz"
+
+# Check if prebuilt compositor exists
+if [ -f "$PREBUILT_FILE" ]; then
+    echo "Found prebuilt compositor for ${ARCH} Node ${NODE_MAJOR}"
+    echo "Using prebuilt version (fast installation, no compilation needed)..."
+    
+    # Extract prebuilt to compositor directory
+    cd "$COMPOSITOR_DIR"
+    tar -xzf "$PREBUILT_FILE"
+    if [ $? -eq 0 ]; then
+        echo "Prebuilt compositor installed successfully"
+        USING_PREBUILT=1
+    else
+        echo "Warning: Failed to extract prebuilt, will compile from source"
+    fi
 fi
 
-# Install compositor dependencies (this will also compile native module via preinstall)
-npm install --omit=dev
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to install compositor packages or compile native module"
-    cd "$PLUGIN_DIR"
-    cleanup_on_error
-fi
-
-echo "Compositor packages installed successfully"
-
-# Verify native module was compiled
-if [ ! -f "$COMPOSITOR_DIR/native/rgb565/build/Release/rgb565.node" ]; then
-    echo "Warning: Native module not found at expected location"
-    echo "Attempting manual compilation..."
-    cd "$NATIVE_DIR"
+# If no prebuilt or extraction failed, compile from source
+if [ -z "$USING_PREBUILT" ]; then
+    echo "No prebuilt available for ${ARCH} Node ${NODE_MAJOR}"
+    echo "Installing build dependencies for compilation..."
+    apt-get install -y build-essential
     if [ $? -ne 0 ]; then
-        echo "Error: Failed to change to native module directory"
+        echo "Error: Failed to install build dependencies"
+        cleanup_on_error
+    fi
+    
+    echo "Compiling compositor from source (this may take 15+ minutes on slower systems)..."
+    cd "$COMPOSITOR_DIR"
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to change to compositor directory"
+        cleanup_on_error
+    fi
+    
+    # Install compositor dependencies (this will also compile native module via preinstall)
+    npm install --omit=dev
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to install compositor packages or compile native module"
         cd "$PLUGIN_DIR"
         cleanup_on_error
     fi
     
-    npm run install_rdmlcd
-    if [ $? -ne 0 ]; then
-        echo "Error: Native module compilation failed"
-        cd "$PLUGIN_DIR"
-        cleanup_on_error
+    echo "Compositor packages installed successfully"
+    
+    # Verify native module was compiled
+    if [ ! -f "$COMPOSITOR_DIR/utils/rgb565.node" ]; then
+        echo "Warning: Native module not found at expected location"
+        echo "Attempting manual compilation..."
+        cd "$NATIVE_DIR"
+        if [ $? -ne 0 ]; then
+            echo "Error: Failed to change to native module directory"
+            cd "$PLUGIN_DIR"
+            cleanup_on_error
+        fi
+        
+        npm run install_rdmlcd
+        if [ $? -ne 0 ]; then
+            echo "Error: Native module compilation failed"
+            cd "$PLUGIN_DIR"
+            cleanup_on_error
+        fi
     fi
+    
+    echo "Native module compiled successfully"
 fi
-
-echo "Native module compiled successfully"
 
 cd "$PLUGIN_DIR"
 
@@ -226,6 +258,13 @@ fi
 
 # Remove lock file
 rm -f "$INSTALLING"
+
+# Fix ownership of all plugin files (install runs as root)
+echo "Setting correct file ownership..."
+chown -R volumio:volumio "$PLUGIN_DIR"
+if [ $? -ne 0 ]; then
+    echo "Warning: Failed to set ownership, but plugin should still work"
+fi
 
 echo ""
 echo "=========================================="
