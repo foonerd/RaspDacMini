@@ -34,6 +34,7 @@ const fs = require("fs");
 const cp = require("child_process");
 const os = require("os");
 const http = require("http");
+const daccontrol = require("./utils/daccontrol.js");
 
 // On s'assure d'utiliser le module d'extension natif compilé pour l'architecture actuelle 
 
@@ -385,30 +386,30 @@ streamer.on("seekChange", (data)=>{
 });
 
 function get_filter(){
-    cp.exec(`apessq2m get_filter`,handle);
-    function handle(rerr,data){
-        if(rerr){ 
-            return;
-        }
-        let _dacFilter = data.replace("\n","").replace("minimum","min");
-		if(dacFilter === _dacFilter) return;
-		dacFilter = _dacFilter;
-		updateMetaDataText("DAC : " + dacFilter, 7, 445, 20);
-    }
+    daccontrol.getFilter().then(function(data){
+        if(!data) return;
+        let _dacFilter = data.replace("minimum","min");
+        if(dacFilter === _dacFilter) return;
+        dacFilter = _dacFilter;
+        updateMetaDataText("DAC : " + dacFilter, 7, 445, 20);
+    });
 }
 get_filter();
 getfilter_interval = setInterval(get_filter, 2000);
 
 function get_input(){
-    cp.exec(`apessq2m get_input`,handle);
-    function handle(rerr,_dacInput){
-      _dacInput = _dacInput.trim();
-      if(rerr || dacInput === _dacInput){return;}
-      dacInput = _dacInput;
-      handleSpdif();
-    }
+    daccontrol.getInput().then(function(_dacInput){
+        if(!_dacInput) return;
+        _dacInput = _dacInput.trim();
+        if(dacInput === _dacInput) return;
+        dacInput = _dacInput;
+        handleSpdif();
+    });
 }
-get_input();
+// Initialize DAC control then start polling
+daccontrol.init().then(function(){
+    get_input();
+});
 // getinput_interval = setInterval(get_input, 2000);
 
 var clear_ip = function(){};
@@ -500,6 +501,32 @@ function server( req,res ){
 			soft_exit_sleep();
 			if(dacInput !== "SPDIF") scroll_animation.toggle();	
 			res.end();
+		break;
+		
+		case("toggle_input"):
+			soft_exit_sleep();
+			daccontrol.toggleInput().then(function(newInput){
+				if(newInput){
+					dacInput = newInput;
+					handleSpdif();
+					res.end(newInput);
+				} else {
+					res.end("error");
+				}
+			});
+		break;
+		
+		case("next_filter"):
+			soft_exit_sleep();
+			daccontrol.nextFilter().then(function(newFilter){
+				if(newFilter){
+					dacFilter = newFilter.replace("minimum","min");
+					updateMetaDataText("DAC : " + dacFilter, 7, 445, 20);
+					res.end(newFilter);
+				} else {
+					res.end("error");
+				}
+			});
 		break;
 		
 		case("filter_change"): 
@@ -805,10 +832,3 @@ fs.readFile("config.json",(err,data)=>{
 	});
 
 });
-
-
-
-
-
-
-

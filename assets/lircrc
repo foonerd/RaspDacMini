@@ -72,6 +72,30 @@ begin
   config = /usr/local/bin/volumio stop &
 end
 
+# Toggle DAC input (I2S/SPDIF)
+begin
+  prog = irexec
+  button = option
+  config = curl -s -m 1 localhost:4153/toggle_input &
+  repeat = 0
+end
+
+# Cycle DAC filters
+begin
+  prog = irexec
+  button = up
+  config = curl -s -m 1 localhost:4153/next_filter &
+  repeat = 0
+end
+
+# Switch display view (toggle metadata scroll)
+begin
+  prog = irexec
+  button = down
+  config = curl -s -m 1 localhost:4153/switch_view &
+  repeat = 0
+end
+
 # System shutdown
 begin
   prog = irexec
