@@ -66,6 +66,10 @@ volumio_listener.prototype.processChanges = function(key,data){
 		this.resetIdleTimeout();
 		this.emit( "volumeChange", data );
 	}
+	else if(key === "mute"){									// changement d'état mute
+		this.resetIdleTimeout();
+		this.emit( "muteChange", data );
+	}
 	else if(key === "samplerate"){
 		this.emit( "sampleRateChange", data );
 		this.emit( "line0", "Sample Rate : " + data );
@@ -123,7 +127,9 @@ volumio_listener.prototype.processChanges = function(key,data){
 	}
 	else if(["repeat", "repeatSingle"].includes(key)){
 		this.emit( "repeatChange", data );
-		this.emit( "line6", "Repeat : " + data );
+	}
+	else if(key === "random"){
+		this.emit( "randomChange", data );
 	}
 };
 

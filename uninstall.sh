@@ -89,8 +89,15 @@ if [ -f /usr/local/bin/volumio-browse-source ]; then
     echo "Source browser script removed"
 fi
 
+# Remove option handler script
+if [ -f /usr/local/bin/option-handler.sh ]; then
+    rm -f /usr/local/bin/option-handler.sh
+    echo "Option handler script removed"
+fi
+
 # Remove temporary state files
 rm -f /tmp/volumio_source_index /tmp/volumio_sources_list 2>/dev/null
+rm -f /tmp/option_press.lock /tmp/option_long_press 2>/dev/null
 
 systemctl daemon-reload
 
@@ -144,4 +151,3 @@ echo "  - rm -rf $PLUGIN_DIR/compositor/node_modules"
 echo ""
 
 echo "pluginuninstallend"
-

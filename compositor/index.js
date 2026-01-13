@@ -254,6 +254,73 @@ function updateStateIcon(ctx, x,y,w,h, state ){
 	
 }
 
+// widget repeat icon
+function updateRepeatIcon(ctx, x, y, w, h, active){
+	ctx.clearRect(x-1, y-1, w+2, h+2);
+	ctx.strokeStyle = active ? "white" : "rgba(255,255,255,0.3)";
+	ctx.fillStyle = active ? "white" : "rgba(255,255,255,0.3)";
+	ctx.lineWidth = 1.5;
+	
+	// Circular arrow for repeat
+	let cx = x + w/2;
+	let cy = y + h/2;
+	let r = Math.min(w, h) / 2 - 2;
+	
+	ctx.beginPath();
+	ctx.arc(cx, cy, r, 0.3, Math.PI * 1.7);
+	ctx.stroke();
+	
+	// Arrow head
+	let ax = cx + r * Math.cos(0.3);
+	let ay = cy + r * Math.sin(0.3);
+	ctx.beginPath();
+	ctx.moveTo(ax - 3, ay - 2);
+	ctx.lineTo(ax + 2, ay);
+	ctx.lineTo(ax - 1, ay + 3);
+	ctx.fill();
+}
+
+// widget shuffle icon
+function updateShuffleIcon(ctx, x, y, w, h, active){
+	ctx.clearRect(x-1, y-1, w+2, h+2);
+	ctx.strokeStyle = active ? "white" : "rgba(255,255,255,0.3)";
+	ctx.fillStyle = active ? "white" : "rgba(255,255,255,0.3)";
+	ctx.lineWidth = 1.5;
+	
+	// Crossed arrows for shuffle
+	let x1 = x + 2;
+	let x2 = x + w - 2;
+	let y1 = y + 3;
+	let y2 = y + h - 3;
+	
+	// First arrow (top-left to bottom-right)
+	ctx.beginPath();
+	ctx.moveTo(x1, y1);
+	ctx.lineTo(x2 - 3, y2);
+	ctx.stroke();
+	
+	// Second arrow (bottom-left to top-right)
+	ctx.beginPath();
+	ctx.moveTo(x1, y2);
+	ctx.lineTo(x2 - 3, y1);
+	ctx.stroke();
+	
+	// Arrow heads on right side
+	ctx.beginPath();
+	ctx.moveTo(x2, y1);
+	ctx.lineTo(x2 - 4, y1 - 2);
+	ctx.lineTo(x2 - 4, y1 + 2);
+	ctx.closePath();
+	ctx.fill();
+	
+	ctx.beginPath();
+	ctx.moveTo(x2, y2);
+	ctx.lineTo(x2 - 4, y2 - 2);
+	ctx.lineTo(x2 - 4, y2 + 2);
+	ctx.closePath();
+	ctx.fill();
+}
+
 // fn utilitaire pour écrire une ligne sur la page 2
 function updateMetaDataText(txt, x, y ,h){
 	let zone = [x,y-h,320,h+4];
@@ -307,6 +374,16 @@ streamer.on("muteChange", (data)=>{
 streamer.on("stateChange", (data)=>{  
   const zone = [4,4, 10, 10];
   updateStateIcon(scene_ctx, ...zone, data);
+  safeAddZone2Redraw( zone, scene.redrawzones );
+});
+streamer.on("repeatChange", (data)=>{
+  const zone = [18, 3, 12, 12];
+  updateRepeatIcon(scene_ctx, ...zone, data === true);
+  safeAddZone2Redraw( zone, scene.redrawzones );
+});
+streamer.on("randomChange", (data)=>{
+  const zone = [34, 3, 12, 12];
+  updateShuffleIcon(scene_ctx, ...zone, data === true);
   safeAddZone2Redraw( zone, scene.redrawzones );
 });
 streamer.on("line0", (data)=>{ updateMetaDataText(data, 7, 270, 20) } );
@@ -481,6 +558,10 @@ function monitor_clock(){
 }
 monitor_clock();
 getclock_interval = setInterval(monitor_clock, 1000*30);
+
+// Initialize repeat/shuffle icons (off state)
+updateRepeatIcon(scene_ctx, 18, 3, 12, 12, false);
+updateShuffleIcon(scene_ctx, 34, 3, 12, 12, false);
 
 
 function soft_exit_sleep(){
