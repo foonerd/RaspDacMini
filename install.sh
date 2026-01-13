@@ -11,17 +11,31 @@ PLUGIN_DIR="/data/plugins/system_hardware/raspdac_mini_lcd"
 COMPOSITOR_DIR="$PLUGIN_DIR/compositor"
 NATIVE_DIR="$PLUGIN_DIR/native/rgb565"
 
-# Architecture check - Raspberry Pi only
-ARCH=$(dpkg --print-architecture)
-if [ "$ARCH" != "armhf" ] && [ "$ARCH" != "arm64" ]; then
-    echo "Error: This plugin requires ARM architecture (Raspberry Pi)"
-    echo "Detected architecture: $ARCH"
-    echo "Supported architectures: armhf, arm64"
+# Detect Volumio architecture from /etc/os-release
+VOLUMIO_ARCH=$(grep ^VOLUMIO_ARCH /etc/os-release | tr -d 'VOLUMIO_ARCH="')
+if [ -z "$VOLUMIO_ARCH" ]; then
+    echo "Error: Could not detect Volumio architecture from /etc/os-release"
     echo "plugininstallend"
     exit 1
 fi
 
-echo "Architecture check passed: $ARCH"
+# Map Volumio arch to prebuilt filename arch
+case "$VOLUMIO_ARCH" in
+    arm|armv7)
+        PREBUILT_ARCH="armv7l"
+        ;;
+    armv8)
+        PREBUILT_ARCH="aarch64"
+        ;;
+    *)
+        echo "Error: Unsupported architecture: $VOLUMIO_ARCH"
+        echo "Supported: arm, armv7, armv8"
+        echo "plugininstallend"
+        exit 1
+        ;;
+esac
+
+echo "Detected Volumio architecture: $VOLUMIO_ARCH (prebuilt: $PREBUILT_ARCH)"
 
 # Create installation lock file
 INSTALLING="/home/volumio/raspdac_mini_lcd.installing"
@@ -41,7 +55,21 @@ cleanup_on_error() {
     exit 1
 }
 
+# Detect Node version and check for prebuilt
+NODE_MAJOR=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+PREBUILT_FILE="$PLUGIN_DIR/assets/compositor-${PREBUILT_ARCH}-node${NODE_MAJOR}.tar.gz"
+
+# Check if prebuilt exists to determine which packages to install
+if [ -f "$PREBUILT_FILE" ]; then
+    echo "Found prebuilt compositor for ${PREBUILT_ARCH} Node ${NODE_MAJOR}"
+    HAVE_PREBUILT=1
+else
+    echo "No prebuilt for ${PREBUILT_ARCH} Node ${NODE_MAJOR}, will compile from source"
+    HAVE_PREBUILT=0
+fi
+
 echo "Installing system dependencies..."
+
 # Update package list
 apt-get update
 if [ $? -ne 0 ]; then
@@ -49,23 +77,28 @@ if [ $? -ne 0 ]; then
     cleanup_on_error
 fi
 
-# Install required system packages
-apt-get install -y build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fbset jq
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to install system dependencies"
-    cleanup_on_error
+if [ "$HAVE_PREBUILT" = "1" ]; then
+    # Prebuilt exists - install only runtime libraries (no -dev packages, no build-essential)
+    echo "Installing runtime dependencies only (using prebuilt)..."
+    apt-get install -y --no-install-recommends libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 fbset jq
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to install runtime dependencies"
+        cleanup_on_error
+    fi
+else
+    # No prebuilt - install build tools and development libraries
+    echo "Installing build dependencies for compilation..."
+    apt-get install -y --no-install-recommends build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fbset jq
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to install build dependencies"
+        cleanup_on_error
+    fi
 fi
 
 echo "System dependencies installed successfully"
 
-# Detect architecture and Node version for prebuilt check
-ARCH=$(uname -m)
-NODE_MAJOR=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
-PREBUILT_FILE="$PLUGIN_DIR/assets/compositor-${ARCH}-node${NODE_MAJOR}.tar.gz"
-
-# Check if prebuilt compositor exists
-if [ -f "$PREBUILT_FILE" ]; then
-    echo "Found prebuilt compositor for ${ARCH} Node ${NODE_MAJOR}"
+# Install prebuilt or compile from source
+if [ "$HAVE_PREBUILT" = "1" ]; then
     echo "Using prebuilt version (fast installation, no compilation needed)..."
     
     # Extract prebuilt to compositor directory
@@ -81,14 +114,6 @@ fi
 
 # If no prebuilt or extraction failed, compile from source
 if [ -z "$USING_PREBUILT" ]; then
-    echo "No prebuilt available for ${ARCH} Node ${NODE_MAJOR}"
-    echo "Installing build dependencies for compilation..."
-    apt-get install -y build-essential
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to install build dependencies"
-        cleanup_on_error
-    fi
-    
     echo "Compiling compositor from source (this may take 15+ minutes on slower systems)..."
     cd "$COMPOSITOR_DIR"
     if [ $? -ne 0 ]; then
@@ -171,7 +196,7 @@ fi
 echo "Installing LIRC for remote control..."
 
 # Install LIRC package
-apt-get install -y lirc
+apt-get install -y --no-install-recommends lirc
 if [ $? -ne 0 ]; then
     echo "Warning: Failed to install lirc, remote control will not work"
 else
@@ -191,13 +216,15 @@ else
     cp "$PLUGIN_DIR/assets/lircrc" "$PLUGIN_DIR/lirc/lircrc"
     cp "$PLUGIN_DIR/assets/lirc_options.conf" "$PLUGIN_DIR/lirc/lirc_options.conf"
     
-    # Detect architecture for plugin path
-    LIRC_ARCH=$(dpkg --print-architecture)
-    if [ "$LIRC_ARCH" = "arm64" ]; then
-        LIRC_PLUGIN_DIR="/usr/lib/aarch64-linux-gnu/lirc/plugins"
-    else
-        LIRC_PLUGIN_DIR="/usr/lib/arm-linux-gnueabihf/lirc/plugins"
-    fi
+    # Detect library path based on Volumio architecture
+    case "$VOLUMIO_ARCH" in
+        arm|armv7)
+            LIRC_PLUGIN_DIR="/usr/lib/arm-linux-gnueabihf/lirc/plugins"
+            ;;
+        armv8)
+            LIRC_PLUGIN_DIR="/usr/lib/aarch64-linux-gnu/lirc/plugins"
+            ;;
+    esac
     
     # Update lirc_options.conf with correct plugin path
     sed -i "s|plugindir = .*|plugindir = $LIRC_PLUGIN_DIR|" "$PLUGIN_DIR/lirc/lirc_options.conf"
@@ -361,5 +388,3 @@ echo "  - View logs: journalctl -u rdmlcd.service -f"
 echo ""
 
 echo "plugininstallend"
-
-
