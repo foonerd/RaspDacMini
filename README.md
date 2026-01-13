@@ -18,6 +18,10 @@ Display driver plugin for Audiophonics RaspDacMini with 2.4" LCD (320x240) on Vo
 * Album art with background blur effect
 * Scrolling text with easing animation
 * Volume and playback state indicators
+* Repeat and shuffle status icons in header
+* Mute indicator with visual feedback
+* DAC input control (I2S/SPDIF toggle)
+* DAC filter cycling
 * Configurable screen timeout
 * IR remote control support (Audiophonics ApEvo remote)
 * Prebuilt compositor packages for fast installation
@@ -114,14 +118,15 @@ The plugin includes support for the Audiophonics ApEvo IR remote control with cu
 | Play | Play/Pause toggle |
 | Previous (left) | Previous track |
 | Next (right) | Next track |
-| Left arrow (playleft) | Seek backward 10s (hold) |
-| Right arrow (playright) | Seek forward 10s (hold) |
-| Up | Browse sources - scroll up |
-| Down | Browse sources - scroll down |
-| Option (Select) | Browse sources - activate selected |
+| Left arrow (playleft) | Seek backward (hold) |
+| Right arrow (playright) | Seek forward (hold) |
+| Up | Cycle DAC filters |
+| Down | Switch display view (metadata scroll) |
+| Option | Short press: Toggle repeat / Long press: Toggle shuffle |
+| Input | Toggle DAC input (I2S/SPDIF) |
 | Volume + | Volume up |
 | Volume - | Volume down |
-| Mute | Mute toggle |
+| Mute | Mute/unmute toggle |
 | OK | Stop playback |
 | Power | System shutdown |
 
@@ -158,6 +163,35 @@ If no output, check:
 - lircd-setup.service completed successfully
 
 ## Architecture
+
+### Display Layout
+
+The LCD header (top bar) shows status indicators:
+
+```
+[Play/Pause] [IP Address] ... [Clock] ... [Repeat] [Shuffle] [Volume]
+     4,4        21,15          165,15      226,3    242,3     260,2
+```
+
+* Play/Pause/Stop icon (left)
+* IP address and clock (center)
+* Repeat icon - dim when off, bright when active
+* Shuffle icon - dim when off, bright when active
+* Volume indicator with level waves
+
+### HTTP Control Endpoints
+
+The compositor runs an HTTP server on port 4153 for external control:
+
+| Endpoint | Function |
+|----------|----------|
+| /switch_view | Toggle metadata scroll view |
+| /toggle_input | Toggle DAC input (I2S/SPDIF) |
+| /next_filter | Cycle to next DAC filter |
+| /toggle_repeat | Toggle repeat mode (1.5s debounce) |
+| /toggle_shuffle | Toggle shuffle mode (1.5s debounce) |
+| /nosleep | Reset idle timeout |
+| /poweroff | Shutdown system |
 
 ### Layer Overview
 
@@ -204,6 +238,7 @@ raspdac_mini_lcd/
 │   │   └── SERVICE_DOCUMENTATION.txt # Service configuration guide
 │   └── utils/                        # Compositor utility modules
 │       ├── volumiolistener.js        # Volumio socket.io integration
+│       ├── daccontrol.js             # Native DAC control (I2S/SPDIF, filters)
 │       ├── scroll_animation.js       # Easing functions for scrolling
 │       ├── panicmeter.js             # Write collision detection
 │       ├── upnp_albumart_fallback.js # Album art fallback logic
@@ -218,7 +253,7 @@ raspdac_mini_lcd/
 
 ## Development Status
 
-### Completed (v1.0.0)
+### Completed (v1.1.0)
 
 * [x] Plugin structure and configuration
 * [x] Volumio 4.x integration
@@ -230,6 +265,12 @@ raspdac_mini_lcd/
 * [x] Environment variable configuration pass-through
 * [x] UI definition and translations
 * [x] Canvas 2.11.2 compatibility (Node 20)
+* [x] DAC input control (I2S/SPDIF)
+* [x] DAC filter cycling
+* [x] Repeat/shuffle icons with visual feedback
+* [x] Mute state handling
+* [x] Debounced remote control endpoints
+* [x] Docker-based prebuilt generation
 
 ### Testing Status
 
@@ -429,6 +470,45 @@ For issues and support:
 * Volumio Forum: https://community.volumio.com/
 
 ## Changelog
+
+### Version 1.1.0 (2025-01-13)
+
+**DAC Control, Visual Feedback & Reliability Improvements**
+
+* DAC control integration
+  - Native Node.js DAC control (replaces shell scripts)
+  - Toggle I2S/SPDIF input via Input button
+  - Cycle DAC filters via Up button
+  - SPDIF mode displays full-screen indicator
+
+* Display improvements
+  - Repeat icon in header (circular arrow, position 226,3)
+  - Shuffle icon in header (crossed arrows, position 242,3)
+  - Icons dim when inactive, bright when active
+  - Mute state now triggers visual feedback
+
+* Remote control reliability
+  - Debounced repeat/shuffle endpoints (1.5s cooldown)
+  - Eliminates rapid-fire toggle issues
+  - All timing logic moved to compositor (single-threaded)
+  - Removed shell script intermediaries
+
+* Button mapping changes
+  - Option: Short press = repeat, Long press = shuffle
+  - Input: Toggle DAC input (I2S/SPDIF)
+  - Up: Cycle DAC filters
+  - Down: Switch display view
+  - Mute: Now properly toggles (was mute-only)
+
+* Code quality
+  - All comments translated to English
+  - Compositor version 3.0.0
+  - Credits updated (Author: Nerd, Original: Olivier Schwach)
+
+* Build system
+  - Docker-based prebuilt generation
+  - Pinned Node.js 20.15 for reliable canvas prebuilts
+  - Separate build repo: github.com/foonerd/raspdacmini-builds
 
 ### Version 1.0.1 (2025-10-28)
 

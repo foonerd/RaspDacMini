@@ -10,7 +10,56 @@ Compiling the compositor from source takes:
 
 Using prebuilt archives reduces installation time to ~10 seconds.
 
-## Requirements
+## Docker Build System (Recommended)
+
+The recommended way to create prebuilts is using the Docker-based build system:
+
+**Repository:** https://github.com/foonerd/raspdacmini-builds
+
+### Quick Start
+
+```bash
+git clone https://github.com/foonerd/raspdacmini-builds
+cd raspdacmini-builds
+
+### All Architectures
+
+```bash
+./build-matrix.sh
+
+# With verbose output
+./build-matrix.sh --verbose
+```
+
+### Single Architecture
+
+```bash
+./docker/run-docker-compositor.sh armhf
+./docker/run-docker-compositor.sh arm64 --verbose
+```
+
+### Build System Details
+
+The Docker build system:
+- Uses QEMU for cross-architecture compilation
+- Pins Node.js 20.15 (has canvas prebuilts for both architectures)
+- Produces consistent, reproducible builds
+- Outputs: `compositor-armv7l-node20.tar.gz` and `compositor-aarch64-node20.tar.gz`
+
+### Dockerfiles
+
+| Architecture | Base Image | Output |
+|--------------|------------|--------|
+| armhf | arm32v7/node:20.15-bookworm | compositor-armv7l-node20.tar.gz |
+| arm64 | arm64v8/node:20.15-bookworm | compositor-aarch64-node20.tar.gz |
+
+**Important:** Node.js version is pinned to 20.15 because later versions may not have prebuilt canvas binaries, forcing source compilation which fails under QEMU.
+
+## Manual Build (Alternative)
+
+If you prefer to build on actual hardware instead of Docker:
+
+### Requirements
 
 You need a working installation on the target architecture to create a prebuilt:
 - Raspberry Pi 3/4/5 with the plugin fully installed and working
@@ -191,12 +240,13 @@ Each combination needs its own prebuilt.
 
 ## Contributing Prebuilts
 
-If you create prebuilts for your architecture:
+The official prebuilts are maintained in the raspdacmini-builds repository:
+https://github.com/foonerd/raspdacmini-builds
 
-1. Test thoroughly on your system
-2. Verify the prebuilt installs correctly
-3. Create a GitHub issue or pull request with the prebuilt attached
-4. Include: Architecture, Node version, Pi model tested on
+To contribute:
+1. Fork the builds repository
+2. Test your changes thoroughly
+3. Submit a pull request with build logs
 
 ## Size Optimization
 
