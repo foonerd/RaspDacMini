@@ -25,35 +25,35 @@ exports.volumio_listener = volumio_listener;
 
 
 /*
-	Comparer data vs this.data et executer processChange sur chaque clé contenant une nouvelle valeur.
+	Compare data vs this.data and execute processChange for each key with a new value.
 */
 volumio_listener.prototype.compareData = function(data){
 	let changes = [];
 	for(d in data){
 		let previous_data = this.data[d];
-		if(this.data[d] === data[d]  ) continue; 			// ne rien faire si aucun changement 
-		this.data[d] = data[d];  				 			// sinon actualiser l'état connu du streamer
-		changes.push([d , this.data[d]]);	// marquer que ce changement doit être propagé 
+		if(this.data[d] === data[d]  ) continue; 			// Do nothing if no change
+		this.data[d] = data[d];  				 			// Otherwise update known streamer state
+		changes.push([d , this.data[d]]);	// Mark this change to be propagated
 	}
 	for(change of changes){
-		this.processChanges(...change);			 			// propager chaque changement
+		this.processChanges(...change);			 			// Propagate each change
 	}
 }
 
-// résoudre chaque changement d'état
+// Resolve each state change
 volumio_listener.prototype.processChanges = function(key,data){ 
 	
-	if( ["title", "artist", "album"].includes(key) ){			// changement de piste
+	if( ["title", "artist", "album"].includes(key) ){			// Track change
 		this.formatMainString();								
 		this.emit( "trackChange", this.formatedMainString );	
-		if(this.state === "play") this.resetIdleTimeout(); 		// la piste peut changer hors lecture (webradios). Ne pas sortir de veille le cas échéant.
+		if(this.state === "play") this.resetIdleTimeout(); 		// Track can change outside playback (web radios). Don't exit sleep in that case.
 	}
-	else if(key === "status"){									// changement d'état (play/pause/stop)
+	else if(key === "status"){									// State change (play/pause/stop)
 		this.state = data;
 		this.resetIdleTimeout();
 		this.emit( "stateChange", data );
 	}
-	else if( ["duration", "seek"].includes(key)){				// avance dans la timeline
+	else if( ["duration", "seek"].includes(key)){				// Timeline progress
 		this.resetIdleTimeout();
 		this.seekFormat();
 		this.emit( "seekChange", this.formatedSeek );
@@ -62,11 +62,11 @@ volumio_listener.prototype.processChanges = function(key,data){
 		this.emit( "bitRateChange", data );
 		this.emit( "line2", "Bit Rate : " + data );
 	}
-	else if(key === "volume"){									// changement de volume
+	else if(key === "volume"){									// Volume change
 		this.resetIdleTimeout();
 		this.emit( "volumeChange", data );
 	}
-	else if(key === "mute"){									// changement d'état mute
+	else if(key === "mute"){									// Mute state change
 		this.resetIdleTimeout();
 		this.emit( "muteChange", data );
 	}
@@ -78,31 +78,31 @@ volumio_listener.prototype.processChanges = function(key,data){
 		this.emit( "sampleDepthChange", data );
 		this.emit( "line1", "Sample Depth : " + data );
 	}
-	else if(key === "albumart"){								// changement de couverture
+	else if(key === "albumart"){								// Cover art change
 			
 
 		if(data === "/albumart"){
 		/*
-			"/albumart" est l'adresse par défaut si aucune couverture n'est disponible.
-			Elle s'affiche aussi durant le changement de piste, ce qui produit souvent
-			un effet désagréable sur le LCD où l'image change plusieurs fois rapidement.
+			"/albumart" is the default address when no cover is available.
+			It also appears during track change, which often causes
+			an unpleasant effect on the LCD where the image changes rapidly.
 			
-			ce bloc "if" limite ce phénomène
+			This "if" block limits this phenomenon
 		*/
 			let waitAndEmit, delayedEmit, cancelDelayedEmit;
 			
 			delayedEmit = ()=>{this.emit( "coverChange",this.host+data );}
-			waitAndEmit = setTimeout(delayedEmit, 5000);		// attendre 5 secondes avant de propager "/albumart"
+			waitAndEmit = setTimeout(delayedEmit, 5000);		// Wait 5 seconds before propagating "/albumart"
 			cancelDelayedEmit = ()=>{clearTimeout(waitAndEmit);}
-			this.once("coverChange", cancelDelayedEmit);		// annuler la propagation si la piste suivante a fini de charger avant la fin du timeout.
+			this.once("coverChange", cancelDelayedEmit);		// Cancel propagation if next track finished loading before timeout
 			return;
 		}
 		
-		if ( /https?:\/\//.test(data) ){		// adresse distante
+		if ( /https?:\/\//.test(data) ){		// Remote address
 			this.emit( "coverChange",data );
 			return;
 		}
-		if(data[0] !== "/") data = "/"+data;	// adresse locale
+		if(data[0] !== "/") data = "/"+data;	// Local address
 		this.emit( "coverChange",this.host+data );
 	}
 	else if(key === "uri"){
@@ -154,7 +154,7 @@ volumio_listener.prototype.listen = function(){
 
 	this._socket.emit("getState");
 	
-	this._socket.on("pushState", (data)=>{ // changements d'état du streamer
+	this._socket.on("pushState", (data)=>{ // Streamer state changes
 		if(!this.firstRequestConsumed){
 			this.firstRequestConsumed = true;
 			this._socket.emit("getState");
@@ -164,7 +164,7 @@ volumio_listener.prototype.listen = function(){
 		this.waiting = false;
 	})
 	this._socket.emit("getQueue");
-	this._socket.on("pushQueue", (resdata)=> {	// changements dans la playlist
+	this._socket.on("pushQueue", (resdata)=> {	// Playlist changes
 		if(resdata && resdata[0]){
 			let additionnalTrackData = resdata[0], filteredData = {};
 			filteredData.playlistlength = resdata.length;
@@ -209,7 +209,7 @@ volumio_listener.prototype.formatMainString = function (){
 	this.formatedMainString = this.data.title + (this.data.artist?" - " + this.data.artist:"") + (this.data.album?" - " + this.data.album:"");
 }
 
-// considérer que le streamer est inactif (en veille) après un certain temps d'inactivité
+// Consider streamer inactive (sleeping) after a certain period of inactivity
 volumio_listener.prototype.watchIdleState = function(iddletime){
 	this.watchingIdle = true;
 	this.iddletime = iddletime;
@@ -233,6 +233,3 @@ volumio_listener.prototype.clearIdleTimeout = function(){
 	this.iddle = false;
 	clearTimeout(this._iddleTimeout);
 }
-
-
-

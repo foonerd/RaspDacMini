@@ -1,20 +1,19 @@
 /*
 scrollAnimation version 1
 
-Auteur Olivier Schwach
+Original author: Olivier Schwach
 Version 0.4
 
-Implémentation basique de la fonction logistique pour faire des transitions "ease-in ease-out" 
-Conçu pour faire des animations agréables avec un canvas js 
+Basic implementation of logistic function for "ease-in ease-out" transitions
+Designed for smooth animations with JS canvas
 
 
-
-	USAGE : 
+	USAGE:
 	
 		const scroll_animation = new scrollAnimation();
 		scroll_animation.plotScrollEase(80, 0, -215, 0.8);
 		
-		//animation de scroll vertical sur 215 px
+		// Vertical scroll animation over 215 px
 		let cycles = 80;
 		while(cycles--){
 			let verticalOffset = scroll_animation.cycle();
@@ -23,7 +22,7 @@ Conçu pour faire des animations agréables avec un canvas js
 		
 		
 		
-+ d'info sur fonction logistique https://en.wikipedia.org/wiki/Logistic_function 		
+More info on logistic function: https://en.wikipedia.org/wiki/Logistic_function 		
 */
 
 
@@ -64,7 +63,7 @@ scrollAnimation.prototype.toggle = function(){
 		this.direction *= -1;
 		this.play();
 	}
-	else if(this.isPlaying){ // permet un "animation cancelling" rudimentaire (ne recalcule pas le scrollEase à partir de la position actuelle, mais joue le cycle déjà écoulé en sens inverse)
+	else if(this.isPlaying){ // Basic "animation cancelling" (doesn't recalculate scrollEase from current position, just plays elapsed cycle in reverse)
 		this.direction *= -1;	
 	}
 	else this.play();

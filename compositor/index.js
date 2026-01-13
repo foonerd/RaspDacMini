@@ -1,11 +1,12 @@
 /*
-	RaspDacMini LCD affichage écran.
-	Version : 2.1.0
-	Auteur : Olivier Schwach
-
+    RaspDacMini LCD Compositor
+    Version: 3.0.0
+    
+    Author: Nerd (https://github.com/foonerd)
+    Original code by Olivier Schwach (Audiophonics)
 */
 
-// Vérifier qu'on est bien dans une distrib connue.
+// Verify we are running on a supported distribution
 const distro = process.argv[2],
 supported_distributions = ["moode", "volumio"];
 if(!distro || !supported_distributions.includes(distro) ){
@@ -13,11 +14,11 @@ if(!distro || !supported_distributions.includes(distro) ){
 	process.exit();
 }
 
-// Fichier qui doit recevoir le stream contenant l'image rendue de l'écran
+// Framebuffer device to receive the rendered screen image
 const targetBuffer = process.argv[3] || "/dev/fb1";
 
 
-// On écoute les données de lecture correspondantes à la distro actuelle
+// Listen for playback data from the current distribution
 var streamer;
 switch(distro){
 	case("moode"):
@@ -36,53 +37,53 @@ const os = require("os");
 const http = require("http");
 const daccontrol = require("./utils/daccontrol.js");
 
-// On s'assure d'utiliser le module d'extension natif compilé pour l'architecture actuelle 
+// Ensure we use the native extension module compiled for the current architecture
 
 const { Image, createCanvas, loadImage, DOMMatrix, ImageData  } = require('canvas');
 
-// Canvas principal (ce qui est dessus = ce qui est affiché à l'écran)
+// Main canvas (what's on it = what's displayed on screen)
 const canvas = createCanvas(320, 240 );
 const ctx = canvas.getContext("2d" );	
 
-// Canvas abstrait (la scène dans toute sa verticalité en pleine hauteur et qu'on fait défiler verticalement dans le canvas principal)
+// Scene canvas (full height scene that scrolls vertically into main canvas)
 const scenecanvas = createCanvas(320, 455 );
 const scene_ctx = scenecanvas.getContext("2d" );
 
-// second canvas pour stocker l'image de la jaquette + le filtre flou (évite de recalculer le blur à chaque cycle)
+// Cover canvas to store album art + blur filter (avoids recalculating blur each cycle)
 const StackBlur = require('stackblur-canvas'); 
 const covercanvas = createCanvas(320, 240);
 const coverctx = covercanvas.getContext("2d" );
 
 const { panicMeter } = require('./utils/panicmeter.js');
-const panicmeter = new panicMeter();	// petit utilitaire surveiller les colisions en écriture (quand on tente d'écrire une frame alors que la précédente est encore en transfert)
+const panicmeter = new panicMeter();	// Utility to monitor write collisions (when writing a frame while previous is still transferring)
 
 
-// extension native pour convertir l'image du compositeur dans le format attendu par l'écran ili9341 (tourne l'écran aussi)
+// Native extension to convert compositor image to ILI9341 display format (also rotates screen)
 const colorConvert = require('./utils/rgb565.node');
 
-// Nombre de frames avant que le texte ne commence à défiler (après un changement de piste) 
+// Number of frames before text starts scrolling (after track change)
 const base_refresh_track = 80;
 
 const SCROLLTIME = 1600; // in ms
 
 
-// Intervalle entre deux cycles de rendu / écriture
+// Interval between render/write cycles
 const UPDATE_INTERVAL = 20; // in ms
 
-// petit utilitaire pour que le défilement vertical de l'écran ait un effet ease-in ease-out  
+// Utility for vertical screen scroll ease-in ease-out effect
 const { scrollAnimation  } = require('./utils/scroll_animation.js');
 const scroll_animation = new scrollAnimation();
 scroll_animation.plotScrollEase(SCROLLTIME / UPDATE_INTERVAL, 0, -215, 0.8);
 
 
-// Etats variables
-var main_text_width = 0;				// la largeur en px du bloc texte défilant
-var should_scroll = false;				// est-ce que le texte défile
-var main_text = "";						// la chaine de caractère du texte défilant
-var cachedRasterizedMainText = null;	// canvas contenant une représentation du texte défilant doublé séparé par un tiret
-var textScrollerX = 0;					// l'état actuel du défilement du texte
-var refresh_track = 0;					// combien de frame faut-il encore attendre avant de commencer le défilement
-var cover = {							// la couverture actuelle & ses métadonnées
+// Variable states
+var main_text_width = 0;				// Width in px of scrolling text block
+var should_scroll = false;				// Is text scrolling
+var main_text = "";						// Scrolling text string
+var cachedRasterizedMainText = null;	// Canvas containing rasterized scrolling text doubled with separator
+var textScrollerX = 0;					// Current scroll position of text
+var refresh_track = 0;					// Frames to wait before starting scroll
+var cover = {							// Current cover art and metadata
 	imageData : new ImageData(320,240),
 	height : null,
 	width : null,
@@ -96,13 +97,13 @@ var scene = {
 var display = {
   redrawzones : []
 }
-var mainMatrix =  new DOMMatrix([1,0,0,1,0,0]);	// matrice globale du canvas principale (sert au défilement vertical)
-var busy = false;								// indique si le stream est libre pour écrire des données
-var last_ip = "";								// dernière ip connue
-var dacInput = "";								// entrée actuelle du DAC Audiphonics ES9038Q2M
-var dacFilter = "?";							// filtre actuel du DAC Audiphonics ES9038Q2M
+var mainMatrix =  new DOMMatrix([1,0,0,1,0,0]);	// Global matrix of main canvas (used for vertical scrolling)
+var busy = false;								// Indicates if stream is free to write data
+var last_ip = "";								// Last known IP address
+var dacInput = "";								// Current input of Audiophonics ES9038Q2M DAC
+var dacFilter = "?";							// Current filter of Audiophonics ES9038Q2M DAC
 
-// toutes les actions récurentes
+// All recurring actions
 var bufwrite_interval = null;
 var getfilter_interval = null;
 var getinput_interval = null;
@@ -111,11 +112,11 @@ var getclock_interval = null;
 
 
 
-// valeurs par défaut qu'on peut surcharger en mettant un fichier de configuration dans le même dossier que ce fichier
+// Default values that can be overridden by placing a config file in the same folder
 var TIME_BEFORE_DEEPSLEEP = 900000; // in ms
 
 
-// utilitaire pour rajouter des zéros devant à une chaine de caractères
+// Utility to add leading zeros to a string
 function leadingZero(a,b){
 	if(!a){
 		let r = "";
@@ -125,14 +126,14 @@ function leadingZero(a,b){
 	return([1e15]+a).slice(-b)
 }
 
-// Methodes de dessin
+// Drawing methods
 function updateCover(img,src){
 	
-	// si la cover précédente est longue à charger, il est possible que ce bout de code s'exécute alors que la piste a déjà changé, on ne met pas à jour si c'est le cas 
+	// If previous cover is slow to load, this code may execute when track has already changed - don't update in that case
 	if(src && src !== cover.src) return;
 	
 	let vratio = canvas.height / img.height, 
-	canvasBoxData = [0, 0 ,canvas.width, canvas.height]; // éviter de tout réecrire à chaque fois. 
+	canvasBoxData = [0, 0 ,canvas.width, canvas.height]; // Avoid rewriting everything each time
 	
 	cover.width = img.width * vratio;
 	cover.height = canvas.height;
@@ -140,16 +141,16 @@ function updateCover(img,src){
 	cover.y = ( canvas.height - cover.height )/2;
 	coverctx.fillStyle="black";
 	coverctx.fillRect(0,0,320,240);
-	coverctx.drawImage(img,...canvasBoxData); // On dessine l'image étirée dans toute la largeur du canvas secondaire
-	let blur_imgdata = coverctx.getImageData(...canvasBoxData);	// On capture l'image étirée
-	blur_imgdata = StackBlur.imageDataRGBA(blur_imgdata, ...canvasBoxData , 50); // On floute l'image étirée
-	coverctx.putImageData(blur_imgdata, 0, 0 );	// On réinjecte l'image étirée floutée dans le canvas secondaire
-	coverctx.drawImage(img, cover.x,cover.y, cover.width, cover.height);	// On dessine l'image de base (non-floutée) au centre par dessus
-	cover.imageData = coverctx.getImageData(...canvasBoxData); // On capture l'ensemble 
+	coverctx.drawImage(img,...canvasBoxData); // Draw stretched image across full width of secondary canvas
+	let blur_imgdata = coverctx.getImageData(...canvasBoxData);	// Capture stretched image
+	blur_imgdata = StackBlur.imageDataRGBA(blur_imgdata, ...canvasBoxData , 50); // Blur the stretched image
+	coverctx.putImageData(blur_imgdata, 0, 0 );	// Reinject blurred stretched image into secondary canvas
+	coverctx.drawImage(img, cover.x,cover.y, cover.width, cover.height);	// Draw original (non-blurred) image centered on top
+	cover.imageData = coverctx.getImageData(...canvasBoxData); // Capture the result
 	cover.need_redraw = true
 }
 
-// à utiliser pour fournir son propre objet image indépendant de ce que le streamer trouve dans son implémentation native
+// Use to provide custom image object independent of streamer's native implementation
 function directUpdateCover(imageObject){
 	cover.imageData = new ImageData(320,240);
 	cover.src = null;
@@ -159,10 +160,10 @@ function directUpdateCover(imageObject){
 	updateCover( canvasImage, false );
 }
 
-// widget volume
+// Volume widget
 function updateVolumeIcon(ctx, x,y,w,h, level ){
 	let zone = [x-2,y-4,w+6,h+6]
-	ctx.clearRect(...zone);	// Valeurs déterminées par tatonnage. Ce serait pénible de devoir changer la taille du widget volume
+	ctx.clearRect(...zone);	// Values determined by trial and error
 	
 	
 	ctx.strokeStyle = "white";
@@ -173,7 +174,7 @@ function updateVolumeIcon(ctx, x,y,w,h, level ){
 		px = (n)=>{ return x + x_grid*n },
 		py = (n)=>{ return y + y_grid*n }
 	
-	// logo du Haut-parleur
+	// Speaker icon
 	
 	ctx.beginPath();
 	ctx.moveTo( px(0) 	, py(1) );
@@ -185,11 +186,11 @@ function updateVolumeIcon(ctx, x,y,w,h, level ){
 	ctx.closePath();
 	ctx.fill();
 	ctx.beginPath();
-	// on dessine des petites ondes sonores en fonction du volume (interface sympa) 
+	// Draw sound waves based on volume level
 	
 	ctx.lineWidth = 2;
 	
-	if( !parseInt(level)  ){ // pas de volume : petite croix
+	if( !parseInt(level)  ){ // No volume: small cross
 		ctx.moveTo( px(12) 	, py(0.5) );
 		ctx.lineTo( px(19) 	, py(3.5) );
 		ctx.moveTo( px(12) 	, py(3.5) );
@@ -198,14 +199,14 @@ function updateVolumeIcon(ctx, x,y,w,h, level ){
 		return;
 	}
 	
-	ctx.beginPath();	// volume bas : petite onde	
+	ctx.beginPath();	// Low volume: small wave
 	ctx.moveTo( px(10) 	, py(3) );
 	ctx.bezierCurveTo(	
 		px(13)	, py(2.5), 
 		px(13)	, py(1.5),
 		px(10)	, py(1)
 	);
-	if( level > 33  ){ 	// moyen volume : 2eme petite onde
+	if( level > 33  ){ 	// Medium volume: second wave
 		ctx.moveTo( px(14) 	, py(3.5) );
 		ctx.bezierCurveTo(	
 			px(17)	, py(2.5), 
@@ -213,7 +214,7 @@ function updateVolumeIcon(ctx, x,y,w,h, level ){
 			px(14)	, py(0.5)
 		);
 	}
-	if( level > 66  ){ 	// volume élevé : 3eme petite onde
+	if( level > 66  ){ 	// High volume: third wave
 		ctx.moveTo( px(19) 	, py(4) );
 		ctx.bezierCurveTo(	
 			px(20)	, py(2.5), 
@@ -225,14 +226,14 @@ function updateVolumeIcon(ctx, x,y,w,h, level ){
 	
 }
 
-// widget play / pause / stop
+// Play / pause / stop widget
 function updateStateIcon(ctx, x,y,w,h, state ){
 	ctx.clearRect(x,y,w,h);
 	ctx.fillStyle = "white";
 	ctx.strokeStyle = "white";
 	
 	if(state === "play"){
-		// play : un triangle
+		// Play: triangle
 		ctx.beginPath();
 		ctx.moveTo(x,y);
 		ctx.lineTo(x,y+h);
@@ -242,19 +243,19 @@ function updateStateIcon(ctx, x,y,w,h, state ){
 		return;
 	}	
 	if(state === "pause"){
-		// pause : deux rectangles
+		// Pause: two rectangles
 		ctx.clearRect(x,y,w,h);
 		ctx.fillRect(x,y,w/3,h);
 		ctx.fillRect(x,y,w/3,h);
 		ctx.fillRect(x+w/1.5,y,w/3,h);
 		return;
 	}
-		// default : stop ( carré )
+		// Default: stop (square)
 	ctx.fillRect(x,y,w,h);
 	
 }
 
-// widget repeat icon
+// Repeat icon widget
 function updateRepeatIcon(ctx, x, y, w, h, active){
 	ctx.clearRect(x-1, y-1, w+2, h+2);
 	ctx.strokeStyle = active ? "white" : "rgba(255,255,255,0.3)";
@@ -321,7 +322,7 @@ function updateShuffleIcon(ctx, x, y, w, h, active){
 	ctx.fill();
 }
 
-// fn utilitaire pour écrire une ligne sur la page 2
+// Utility function to write a line on page 2
 function updateMetaDataText(txt, x, y ,h){
 	let zone = [x,y-h,320,h+4];
 	scene_ctx.fillStyle = "white";
@@ -352,7 +353,7 @@ function handleSpdif(){
   cover.need_redraw = true;
 }
 
-// tous les évenements du streamer
+// All streamer events
 streamer.on("volumeChange", (data)=>{
 	let zonetxt = [285, 0 , 320-285, 16];
 	let zonepic = [260,2, 20, 12];
@@ -377,12 +378,12 @@ streamer.on("stateChange", (data)=>{
   safeAddZone2Redraw( zone, scene.redrawzones );
 });
 streamer.on("repeatChange", (data)=>{
-  const zone = [18, 3, 12, 12];
+  const zone = [226, 3, 12, 12];
   updateRepeatIcon(scene_ctx, ...zone, data === true);
   safeAddZone2Redraw( zone, scene.redrawzones );
 });
 streamer.on("randomChange", (data)=>{
-  const zone = [34, 3, 12, 12];
+  const zone = [242, 3, 12, 12];
   updateShuffleIcon(scene_ctx, ...zone, data === true);
   safeAddZone2Redraw( zone, scene.redrawzones );
 });
@@ -394,11 +395,11 @@ streamer.on("line4", (data)=>{ updateMetaDataText(data, 7, 370, 20) } );
 streamer.on("line5", (data)=>{ updateMetaDataText(data, 7, 395, 20) } );
 streamer.on("line6", (data)=>{ updateMetaDataText(data, 7, 420, 20) } );
 streamer.on("coverChange", (data)=>{
-	if(data === cover.src) return; // ne pas recharger l'image actuelle
+	if(data === cover.src) return; // Don't reload current image
 	cover.imageData = new ImageData(320,240);
 	cover.src = data;
 	loadImage( data ).then((img)=>{updateCover(img,data)})
-	.catch(	err => { console.warn('Erreur lors du chargement de la couverture.', err)	} ); // il faudrait un fallback cover ici
+	.catch(	err => { console.warn('Error loading cover art.', err)	} ); // Should add fallback cover here
 });
 streamer.on("directCoverChange", directUpdateCover);
 streamer.on("trackChange", (data)=>{
@@ -407,7 +408,7 @@ streamer.on("trackChange", (data)=>{
 	ctx.font = "25px arial";
 	main_text_width = ctx.measureText( main_text + " - " ).width;
 	
-	//  est-ce que le texte est assez court pour tenir dans toute la largeur de l'écran ? 
+	// Is text short enough to fit in full screen width?
 	if( main_text_width <= canvas.width ){
     let zone = [0, 210 ,320, 30];
 		should_scroll = false;
@@ -424,27 +425,27 @@ streamer.on("trackChange", (data)=>{
 	}
 	else{
 		should_scroll = true;
-		main_text = main_text + " - " + main_text + " - "; // On double le texte pour que le début du texte sorte déjà du bord droit alors que la fin sort encore du bord gauche
+		main_text = main_text + " - " + main_text + " - "; // Double text so start exits right edge while end still exits left edge
 	
-		scene_ctx.clearRect(0, 210 ,320, 30); // au cas où il reste un morceau de texte statique sur le canvas scenecanvas
+		scene_ctx.clearRect(0, 210 ,320, 30); // Clear any remaining static text on scenecanvas
 			
-		// On fill le canvas prévu pour le text avec un raster corespondant au texte doublé
+		// Fill the text canvas with a raster of the doubled text
 	
 		let double_text_width = ctx.measureText( main_text ).width;
-		delete cachedRasterizedMainText; // vraiment utile ?
+		delete cachedRasterizedMainText; // Really needed?
 		cachedRasterizedMainText = createCanvas(double_text_width, 30);
 		cached_ctx = cachedRasterizedMainText.getContext("2d" );
 		
-		// petit arrière-plan noir semi-transparent pour la lisibilité
+		// Semi-transparent black background for readability
 		cached_ctx.fillStyle = "rgba(0,0,0,0.7)";
 		cached_ctx.fillRect(0, 0 ,double_text_width, 30);
 		
-		// on écrit le texte
+		// Write the text
 		cached_ctx.fillStyle = "white";
 		cached_ctx.font = "25px arial";
 		cached_ctx.fillText( main_text, 0, 25 );
 		
-		// on remet le compteur du scroller à zéro
+		// Reset scroller counter to zero
 		textScrollerX = 0;
 		refresh_track = base_refresh_track;
 	}
@@ -560,15 +561,15 @@ monitor_clock();
 getclock_interval = setInterval(monitor_clock, 1000*30);
 
 // Initialize repeat/shuffle icons (off state)
-updateRepeatIcon(scene_ctx, 18, 3, 12, 12, false);
-updateShuffleIcon(scene_ctx, 34, 3, 12, 12, false);
+updateRepeatIcon(scene_ctx, 226, 3, 12, 12, false);
+updateShuffleIcon(scene_ctx, 242, 3, 12, 12, false);
 
 
 function soft_exit_sleep(){
 	try{streamer.resetIdleTimeout()}
 	catch(err){}	
 }
-// Serveur HTTP pour répondre aux commandes externes 
+// HTTP server to respond to external commands
 http.createServer(server).listen(4153);
 function server( req,res ){
 	let url = req.url.split("/")[1],
@@ -638,27 +639,27 @@ function server( req,res ){
 }	
 
 
-// Composition finale de l'image
+// Final image composition
 function Vdraw(){
   
 	//console.time("draw");
 	let verticalOffset = 0;
-	if(dacInput !== "SPDIF"){ // Si SPDIF actif, on affiche un texte fixe au milieu donc on évite de tout redessiner 
+	if(dacInput !== "SPDIF"){ // If SPDIF active, show fixed text in center so skip full redraw 
   
 		verticalOffset = scroll_animation.cycle();
 		ctx.setTransform(mainMatrix);
 		
 		let matrix_with_offset = new DOMMatrix([1,0,0,1,0,verticalOffset]);
 	
-		// tout à l'arrière plan : la coverimage
+		// Background: cover image
 		if(cover.imageData){
-			if(cover.need_redraw || scroll_animation.hasPlayedThisCycle){ // cas où il faut (re)dessiner toute la cover
+			if(cover.need_redraw || scroll_animation.hasPlayedThisCycle){ // Case where full cover needs (re)drawing
 				// ctx.clearRect(0,0,320, 18);
 				ctx.drawImage(covercanvas,0,0); 
 				scene.need_redraw = true;
 				cover.need_redraw = false;
 			}
-			else if(should_scroll){ // il faut (re)dessiner la partie de la cover qui est sous le texte défilant
+			else if(should_scroll){ // Need to (re)draw part of cover under scrolling text
 
 				 let overflow = (210 + verticalOffset)
 				 if(overflow > 0 ) overflow = 0;
@@ -668,17 +669,17 @@ function Vdraw(){
 		}
 		ctx.setTransform( matrix_with_offset );
 		
-		// titre album scroll
+		// Album title scroll
 		if( should_scroll ){ 
 			if(textScrollerX + main_text_width  <= 0 ) textScrollerX = 0;
 		  
       let relative_zone = [0, 210, 320 , 30];
-			// Si le texte doit défiler, on l'a dessiné préalablement dans un canvas de largeur variable 
-			// et c'est ce canvas en question qu'on fait défiler.
+			// If text needs scrolling, it was pre-drawn into variable width canvas
+			// and we scroll that canvas
 			ctx.drawImage( cachedRasterizedMainText, -textScrollerX, 0, 320, 30, 0, 210, 320, 30  );
       
 			
-			if( refresh_track ) refresh_track--; // ne pas updater le curseur de scroll avant d'avoir écoulé les frames statiques (juste après un changement de morceau)
+			if( refresh_track ) refresh_track--; // Don't update scroll cursor before static frames expire (just after track change)
 			else{
         safeAddZone2Redraw(relative_zone, display.redrawzones);
         textScrollerX--;
@@ -688,9 +689,9 @@ function Vdraw(){
 		
 
 		
-		if(scene.need_redraw || scroll_animation.hasPlayedThisCycle ){ // redessiner toute la scene
-			// Barre du haut de l'écran	s
-			// petit arrière-plan noir semi-transparent pour la lisibilité
+		if(scene.need_redraw || scroll_animation.hasPlayedThisCycle ){ // Redraw entire scene
+			// Top bar of screen
+			// Semi-transparent black background for readability
       ctx.fillStyle = "rgba(0,0,0,0.7)";		
       let zoneTop = [0,0,320, 18];
 			ctx.fillRect(...zoneTop);
@@ -706,19 +707,19 @@ function Vdraw(){
 			scene.need_redraw = false;
       safeAddZone2Redraw(zone, display.redrawzones)
 		}
-		else if(scene.redrawzones.length){  // redessiner parties de la scene
+		else if(scene.redrawzones.length){  // Redraw parts of scene
       
 			ctx.setTransform(mainMatrix);
 			ctx.fillStyle = "rgba(0,0,0,0.7)";					
 	
 			
-			const zones = scene.redrawzones.filter( z=>z[1]+z[3] + verticalOffset > 0 && z[1] + verticalOffset < 240  ); // on ne maj que ce qui est visible
+			const zones = scene.redrawzones.filter( z=>z[1]+z[3] + verticalOffset > 0 && z[1] + verticalOffset < 240  ); // Only update what's visible
 			const relative_zones = zones.map(z=>z.map(v=>v)); // deepclone
 			relative_zones.forEach(z=>{
 				z[1]+=verticalOffset;
 			});
-			// zone = position dans le canvas scene
-			// relative_zone = position dans le canvas principal
+			// zone = position in scene canvas
+			// relative_zone = position in main canvas
 			while(zones.length){
 				let zone = zones.pop();
 				let relative_zone = relative_zones.pop();
@@ -734,9 +735,9 @@ function Vdraw(){
 			scene.redrawzones = [];
 		}
 	}	
-	else if(scene.need_redraw || scene.redrawzones.length){ // vue spdif
-      // Barre du haut de l'écran	
-      // petit arrière-plan noir semi-transparent pour la lisibilité
+	else if(scene.need_redraw || scene.redrawzones.length){ // SPDIF view
+      // Top bar of screen
+      // Semi-transparent black background for readability
       const zone = [0,0,320, 18];
       ctx.clearRect(...zone);
       ctx.fillStyle = "rgba(0,0,0,0.5)";			
@@ -754,9 +755,9 @@ function Vdraw(){
 	//console.timeEnd("draw");
 }
 
-// implémentation dirtyRect basique (maintenant que fbcp-ili9341 n'est plus disponible, le driver écran est beaucoup moins performant en écriture)
+// Basic dirtyRect implementation (since fbcp-ili9341 is no longer available, screen driver writes are much slower)
 function safeAddZone2Redraw(zone, list){
-  zone = zone.map(x => x<0?0:x); // on ne va jamais update une valeur négative ( todo : ça serait pas mal de check aussi les overflows)
+  zone = zone.map(x => x<0?0:x); // Never update negative values (TODO: should also check overflows)
   if( list.find( testzone=>{
     for(let i in zone) if( zone[i] !== testzone[i]) return false;
     return true;   
