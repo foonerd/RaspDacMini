@@ -14,8 +14,7 @@
     "icon": "fa-television",
     "plugin_type": "system_hardware",
     "architectures": [
-      "armhf",
-      "arm64"
+      "armhf"
     ],
     "os": [
       "bookworm"
