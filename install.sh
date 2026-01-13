@@ -191,10 +191,6 @@ else
     cp "$PLUGIN_DIR/assets/lircrc" "$PLUGIN_DIR/lirc/lircrc"
     cp "$PLUGIN_DIR/assets/lirc_options.conf" "$PLUGIN_DIR/lirc/lirc_options.conf"
     
-    # Install option button handler script
-    cp "$PLUGIN_DIR/assets/option-handler.sh" /usr/local/bin/option-handler.sh
-    chmod +x /usr/local/bin/option-handler.sh
-    
     # Detect architecture for plugin path
     LIRC_ARCH=$(dpkg --print-architecture)
     if [ "$LIRC_ARCH" = "arm64" ]; then
@@ -365,3 +361,5 @@ echo "  - View logs: journalctl -u rdmlcd.service -f"
 echo ""
 
 echo "plugininstallend"
+
+

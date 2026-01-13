@@ -110,6 +110,10 @@ var getinput_interval = null;
 var getip_interval = null;
 var getclock_interval = null;
 
+// Debounce timestamps for repeat/shuffle (prevents rapid-fire toggling)
+var lastRepeatTime = 0;
+var lastShuffleTime = 0;
+var DEBOUNCE_MS = 1500;
 
 
 // Default values that can be overridden by placing a config file in the same folder
@@ -630,6 +634,34 @@ function server( req,res ){
 			res.end();
 		break;
 		
+		case("toggle_repeat"):
+			soft_exit_sleep();
+			let nowRepeat = Date.now();
+			if(nowRepeat - lastRepeatTime < DEBOUNCE_MS){
+				res.end("debounced");
+				break;
+			}
+			lastRepeatTime = nowRepeat;
+			cp.exec('/usr/local/bin/volumio repeat', function(err, stdout, stderr){
+				if(err) res.end("error");
+				else res.end("ok");
+			});
+		break;
+		
+		case("toggle_shuffle"):
+			soft_exit_sleep();
+			let nowShuffle = Date.now();
+			if(nowShuffle - lastShuffleTime < DEBOUNCE_MS){
+				res.end("debounced");
+				break;
+			}
+			lastShuffleTime = nowShuffle;
+			cp.exec('/usr/local/bin/volumio random', function(err, stdout, stderr){
+				if(err) res.end("error");
+				else res.end("ok");
+			});
+		break;
+		
 		case("poweroff"): 
 			soft_exit_sleep();
 			res.end();
@@ -914,3 +946,10 @@ fs.readFile("config.json",(err,data)=>{
 	});
 
 });
+
+
+
+
+
+
+

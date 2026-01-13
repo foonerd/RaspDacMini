@@ -84,7 +84,7 @@ end
 begin
   prog = irexec
   button = option
-  config = /usr/local/bin/option-handler.sh short &
+  config = curl -s -m 1 localhost:4153/toggle_repeat &
   repeat = 0
 end
 
@@ -92,7 +92,7 @@ end
 begin
   prog = irexec
   button = option
-  config = /usr/local/bin/option-handler.sh long &
+  config = curl -s -m 1 localhost:4153/toggle_shuffle &
   delay = 5
   repeat = 0
 end
