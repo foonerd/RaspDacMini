@@ -318,12 +318,9 @@ if [ $? -ne 0 ]; then
     cleanup_on_error
 fi
 
-# Enable service to start on boot
-systemctl enable rdmlcd.service
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to enable service"
-    cleanup_on_error
-fi
+# Note: Service is NOT enabled at boot level
+# Plugin onStart/onStop methods control service lifecycle
+# This ensures service only runs when plugin is enabled in Volumio UI
 
 # Check if LCD is enabled in config
 LCD_ACTIVE=$(jq -r '.lcd_active.value' "$PLUGIN_DIR/config.json" 2>/dev/null)
@@ -369,5 +366,3 @@ echo "  - View logs: journalctl -u rdmlcd.service -f"
 echo ""
 
 echo "plugininstallend"
-
-
