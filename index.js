@@ -49,8 +49,11 @@ raspdacMiniLCD.prototype.onStart = function() {
         return defer.promise;
     }
 
-    // Start the compositor service
-    self.systemctl('start', 'rdmlcd.service')
+    // Wait for the framebuffer device to become available before starting the service.
+    self.waitForFramebuffer(10, 1000)
+        .then(function() {
+            return self.systemctl('start', 'rdmlcd.service');
+        })
         .then(function() {
             self.logger.info('[RaspDacMini LCD] Service started successfully');
             self.commandRouter.pushToastMessage('success', 'RaspDacMini LCD', 'Display service started');
@@ -224,11 +227,36 @@ raspdacMiniLCD.prototype.checkFramebuffer = function() {
     }
 };
 
+raspdacMiniLCD.prototype.waitForFramebuffer = function(retries, delay) {
+    var self = this;
+    var defer = libQ.defer();
+    var attempt = 0;
+
+    function tryCheck() {
+        attempt++;
+        if (self.checkFramebuffer()) {
+            defer.resolve();
+            return;
+        }
+        if (attempt >= retries) {
+            defer.reject(new Error('Framebuffer /dev/fb1 not found'));
+            return;
+        }
+        setTimeout(tryCheck, delay);
+    }
+
+    tryCheck();
+    return defer.promise;
+};
+
 raspdacMiniLCD.prototype.updateServiceEnvironment = function() {
     var self = this;
     var defer = libQ.defer();
 
-    var sleep_after = self.config.get('sleep_after') || 900;
+    var sleep_after = parseInt(self.config.get('sleep_after'), 10);
+    if (isNaN(sleep_after) || sleep_after < 0) {
+        sleep_after = 900;
+    }
 
     self.logger.info('[RaspDacMini LCD] Updating service environment: SLEEP_AFTER=' + sleep_after);
 

@@ -281,14 +281,15 @@ echo "Creating systemd service file..."
 cat > /etc/systemd/system/rdmlcd.service << 'EOF'
 [Unit]
 Description=RaspDacMini LCD Display Service
-After=volumio.service
-Requires=volumio.service
+After=volumio.service dev-fb1.device
+Requires=volumio.service dev-fb1.device
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/data/plugins/system_hardware/raspdac_mini_lcd/compositor
 Environment="SLEEP_AFTER=900"
+ExecStartPre=/bin/sh -c 'until [ -e /dev/fb1 ]; do sleep 1; done'
 ExecStart=/usr/bin/node index.js volumio /dev/fb1
 StandardOutput=journal
 StandardError=journal
