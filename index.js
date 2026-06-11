@@ -34,12 +34,9 @@ raspdacMiniLCD.prototype.onStart = function() {
 
     self.logger.info('[RaspDacMini LCD] Starting plugin');
 
-    // Check if framebuffer device exists
+    // Warn if framebuffer device is not currently present, but still start the service.
     if (!self.checkFramebuffer()) {
-        self.logger.error('[RaspDacMini LCD] Framebuffer /dev/fb1 not found. Ensure dtoverlay is loaded.');
-        self.commandRouter.pushToastMessage('error', 'RaspDacMini LCD', 'Display device not found. Check dtoverlay installation.');
-        defer.reject(new Error('Framebuffer /dev/fb1 not found'));
-        return defer.promise;
+        self.logger.warn('[RaspDacMini LCD] Framebuffer /dev/fb1 not found at plugin startup; starting service anyway so device may be found later.');
     }
 
     // Check if LCD is enabled in config
