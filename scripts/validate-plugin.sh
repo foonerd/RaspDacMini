@@ -118,6 +118,13 @@ else
     pass "compositor display loop-start log"
 fi
 
+# UI handoff must be gated on backend readiness (/status), not first pushState
+if grep -q 'uiReady' compositor/index.js 2>/dev/null && grep -q '/status' compositor/index.js 2>/dev/null; then
+    pass "compositor gates UI on backend /status readiness"
+else
+    fail "compositor must hold Starting splash until backend /status=ready"
+fi
+
 if grep -q 'if(bufwrite_interval) updateFB' compositor/index.js 2>/dev/null; then
     fail "compositor must not gate updateFB on bufwrite_interval in ready handler"
 fi

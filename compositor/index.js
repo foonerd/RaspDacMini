@@ -113,6 +113,7 @@ var display = {
 var forceFullFrame = true;
 var firstFrameWritten = false;
 var pendingFullRedraw = false;
+var uiReady = false;							// Gate: hold "Starting..." splash until backend reports ready
 var mainMatrix =  new DOMMatrix([1,0,0,1,0,0]);	// Global matrix of main canvas (used for vertical scrolling)
 var busy = false;								// Indicates if stream is free to write data
 var last_ip = "";								// Last known IP address
@@ -535,7 +536,7 @@ streamer.on("connect", function(){
 });
 
 streamer.on("ready", function(){
-	console.log("[Display] phase=ui-ready");
+	console.log("[Display] backend-first-state");
 	requestFullRedraw();
 });
 
@@ -900,6 +901,7 @@ function safeAddZone2Redraw(zone, list){
 
 function updateFB(){
 
+	if(!uiReady) return;	// Keep the Starting splash on screen until backend is ready
 	if(busy){
 		pendingFullRedraw = true;
 		return panicmeter.registerError();
@@ -1035,6 +1037,53 @@ streamer.on("iddleStop", function(){
 });
 
 startDisplayLoop();
+
+/*
+ * Hold the "Starting..." splash until the backend is actually ready.
+ * The compositor connects and receives a first pushState well before Volumio
+ * has finished loading/starting all plugins, which made the UI appear ~30s
+ * early. Volumio exposes readiness at GET /status ("starting" -> "ready", set
+ * ~7s after all plugins start). Poll it and only open the UI gate when ready,
+ * with a hard cap so the screen can never get stuck on "Starting...".
+ */
+function openUiWhenBackendReady(){
+	const STATUS_URL = "http://127.0.0.1:3000/status";
+	const POLL_INTERVAL = 1000;	// ms between polls
+	const MAX_WAIT = 90000;		// ms hard cap (fallback so UI always appears)
+	let waited = 0;
+
+	function openUi(reason){
+		if(uiReady) return;
+		uiReady = true;
+		console.log("[Display] phase=ui-ready (" + reason + ")");
+		requestFullRedraw();
+	}
+
+	function schedule(){
+		if(uiReady) return;
+		waited += POLL_INTERVAL;
+		if(waited >= MAX_WAIT) return openUi("timeout");
+		setTimeout(poll, POLL_INTERVAL);
+	}
+
+	function poll(){
+		if(uiReady) return;
+		const req = http.get(STATUS_URL, function(res){
+			let body = "";
+			res.on("data", function(chunk){ body += chunk; });
+			res.on("end", function(){
+				if(body.trim() === "ready") openUi("status=ready");
+				else schedule();
+			});
+		});
+		req.on("error", function(){ schedule(); });
+		req.setTimeout(2000, function(){ req.destroy(); });
+	}
+
+	poll();
+}
+
+openUiWhenBackendReady();
 
 // Optional config file (moOde / standalone); sleep timeout comes from systemd env on Volumio
 fs.readFile("config.json", (err, data) => {
