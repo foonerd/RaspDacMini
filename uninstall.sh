@@ -35,6 +35,11 @@ fi
 
 rm -f /etc/systemd/system/multi-user.target.wants/rdmlcd-shutdown.service
 
+echo "Restoring plymouth splash services..."
+for unit in plymouth-start.service plymouth-kexec.service plymouth-poweroff.service plymouth-reboot.service plymouth-halt.service; do
+    systemctl unmask "$unit" 2>/dev/null
+done
+
 systemctl daemon-reload
 systemctl reset-failed rdmlcd.service rdmlcd-splash.service rdmlcd-shutdown.service rdm_remote.service rdm_irexec.service 2>/dev/null
 
@@ -62,7 +67,7 @@ rm -f /tmp/option_press.lock /tmp/option_long_press 2>/dev/null
 
 echo "Removing helper scripts..."
 
-for helper in rdmlcd-update-env.sh rdmlcd-show-splash.sh rdmlcd-plugin-services.sh rdmlcd-overlay.sh; do
+for helper in rdmlcd-update-env.sh rdmlcd-show-splash.sh rdmlcd-shutdown-splash.sh rdmlcd-plugin-services.sh rdmlcd-overlay.sh; do
     if [ -f "/usr/local/bin/$helper" ]; then
         rm -f "/usr/local/bin/$helper"
         echo "Removed /usr/local/bin/$helper"

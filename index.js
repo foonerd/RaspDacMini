@@ -91,6 +91,62 @@ raspdacMiniLCD.prototype.onRestart = function() {
         });
 };
 
+/*
+ * Volumio calls onVolumioShutdown() / onVolumioReboot() the moment the user
+ * presses Power Off / Reboot in the UI, and WAITS for the returned promise
+ * before running `systemctl poweroff` / `reboot`. This is the single canonical
+ * point to take ownership of the LCD: stop the compositor and paint the
+ * shutdown/reboot splash once, so it stays on screen continuously until power
+ * is cut (no blank gap, no competing painters).
+ */
+raspdacMiniLCD.prototype.paintLifecycleSplash = function(frame) {
+    var self = this;
+
+    if (!self.getBootSplashEnabled()) {
+        return libQ.resolve();
+    }
+
+    var defer = libQ.defer();
+    var settled = false;
+    var finish = function() {
+        if (settled) {
+            return;
+        }
+        settled = true;
+        defer.resolve();
+    };
+
+    // Never block system shutdown: settle regardless after a hard cap.
+    var guard = setTimeout(function() {
+        self.logger.error('[RaspDacMini LCD] ' + frame + ' splash timed out');
+        finish();
+    }, 8000);
+
+    exec('/usr/bin/sudo /usr/local/bin/rdmlcd-shutdown-splash.sh ' + frame, {uid: 1000, gid: 1000}, function(error, stdout, stderr) {
+        clearTimeout(guard);
+        if (error) {
+            self.logger.error('[RaspDacMini LCD] ' + frame + ' splash failed: ' + (stderr || error));
+        } else {
+            self.logger.info('[RaspDacMini LCD] ' + frame + ' splash painted');
+        }
+        finish();
+    });
+
+    return defer.promise;
+};
+
+raspdacMiniLCD.prototype.onVolumioShutdown = function() {
+    var self = this;
+    self.logger.info('[RaspDacMini LCD] onVolumioShutdown');
+    return self.paintLifecycleSplash('shutdown');
+};
+
+raspdacMiniLCD.prototype.onVolumioReboot = function() {
+    var self = this;
+    self.logger.info('[RaspDacMini LCD] onVolumioReboot');
+    return self.paintLifecycleSplash('reboot');
+};
+
 raspdacMiniLCD.prototype.onInstall = function() {
     var self = this;
     // Handled by install.sh

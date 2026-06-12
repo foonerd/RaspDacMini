@@ -155,9 +155,31 @@ streamFile.on("error", (e) => {
 
 stopBootSplashService();
 
-process.on("SIGINT", function(){
-	printShutDownAndDie(false);
-});
+/*
+ * Clean exit on systemd stop. The shutdown/reboot splash is owned by the plugin
+ * hooks (onVolumioShutdown/onVolumioReboot) which stop this service and then
+ * paint the frame. Painting here on SIGINT produced a brief/torn frame (async
+ * stream write immediately followed by destroy+exit) and a second, competing
+ * painter — so the compositor now just stops drawing and exits.
+ */
+function handleStopSignal(){
+	[
+		bufwrite_interval,
+		getfilter_interval,
+		getinput_interval,
+		getip_interval,
+		getclock_interval
+	].forEach(function(interval){ if(interval) clearInterval(interval); });
+	try {
+		fs.appendFileSync("/data/.rdmlcd-shutdown.log",
+			new Date().toISOString() + " compositor: stop signal, clean exit\n");
+	} catch(e) {}
+	try { streamFile.destroy(); } catch(e) {}
+	process.exit(0);
+}
+
+process.on("SIGINT", handleStopSignal);
+process.on("SIGTERM", handleStopSignal);
 
 
 // Utility to add leading zeros to a string

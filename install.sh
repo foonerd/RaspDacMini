@@ -111,16 +111,19 @@ echo "System dependencies installed successfully"
 # Install prebuilt or compile from source
 if [ "$HAVE_PREBUILT" = "1" ]; then
     echo "Using prebuilt version (fast installation, no compilation needed)..."
-    
-    # Extract prebuilt to compositor directory
-    cd "$COMPOSITOR_DIR"
-    tar -xzf "$PREBUILT_FILE"
-    if [ $? -eq 0 ]; then
+
+    # Extract into a clean temp dir first, then merge into the compositor dir.
+    # Extracting the prebuilt directly over the existing compositor tree triggers
+    # GNU tar "Directory renamed before its status could be extracted" on some
+    # targets (directory-over-directory). Staging in an empty dir avoids that.
+    PREBUILT_TMP=$(mktemp -d)
+    if tar --delay-directory-restore -xzf "$PREBUILT_FILE" -C "$PREBUILT_TMP" && cp -a "$PREBUILT_TMP"/. "$COMPOSITOR_DIR"/; then
         echo "Prebuilt compositor installed successfully"
         USING_PREBUILT=1
     else
         echo "Warning: Failed to extract prebuilt, will compile from source"
     fi
+    rm -rf "$PREBUILT_TMP"
 fi
 
 # If no prebuilt or extraction failed, compile from source
@@ -131,7 +134,22 @@ if [ -z "$USING_PREBUILT" ]; then
         echo "Error: Failed to change to compositor directory"
         cleanup_on_error
     fi
-    
+
+    # The prebuilt branch installs only runtime libraries. If we are compiling
+    # (no prebuilt present, or its extraction failed) the build toolchain and
+    # -dev libraries must be installed first, or node-gyp fails with "not found:
+    # make". apt-get is idempotent, so this is a no-op when already present.
+    echo "Ensuring build toolchain and dev libraries are installed..."
+    apt-get install -y --no-install-recommends build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev fbset jq
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to install build dependencies"
+        cd "$PLUGIN_DIR"
+        cleanup_on_error
+    fi
+
+    # Clear any partial files left by a failed prebuilt extraction.
+    rm -rf "$COMPOSITOR_DIR/node_modules" "$NATIVE_DIR/build"
+
     # Install compositor dependencies (this will also compile native module via preinstall)
     npm install --omit=dev
     if [ $? -ne 0 ]; then
@@ -358,6 +376,18 @@ fi
 # Reset shutdown splash activation (older versions incorrectly used multi-user.target)
 systemctl disable rdmlcd-shutdown.service 2>/dev/null
 
+# Volumio's plymouth draws the system splash on the SPI framebuffer (/dev/fb1) at
+# boot and during shutdown/reboot, overwriting our splash and leaving a backlit
+# blank. Mask only the plymouth units that PAINT a splash so the plugin is the
+# sole owner of the LCD across all phases. Infrastructure units (quit, quit-wait,
+# read-write, rotation, switch-root, ask-password) are left intact. Restored on
+# uninstall.
+PLYMOUTH_SPLASH_UNITS="plymouth-start.service plymouth-kexec.service plymouth-poweroff.service plymouth-reboot.service plymouth-halt.service"
+echo "Masking plymouth splash services so the plugin owns the LCD..."
+for unit in $PLYMOUTH_SPLASH_UNITS; do
+    systemctl mask "$unit" 2>/dev/null
+done
+
 echo "Service files created successfully"
 
 echo "Creating service environment override..."
@@ -420,9 +450,10 @@ chmod 755 /usr/local/bin/rdmlcd-update-env.sh
 echo "Installing splash and plugin service helpers..."
 
 cp "$PLUGIN_DIR/scripts/rdmlcd-show-splash.sh" /usr/local/bin/rdmlcd-show-splash.sh
+cp "$PLUGIN_DIR/scripts/rdmlcd-shutdown-splash.sh" /usr/local/bin/rdmlcd-shutdown-splash.sh
 cp "$PLUGIN_DIR/scripts/rdmlcd-plugin-services.sh" /usr/local/bin/rdmlcd-plugin-services.sh
 cp "$PLUGIN_DIR/scripts/rdmlcd-overlay.sh" /usr/local/bin/rdmlcd-overlay.sh
-chmod 755 /usr/local/bin/rdmlcd-show-splash.sh /usr/local/bin/rdmlcd-plugin-services.sh /usr/local/bin/rdmlcd-overlay.sh
+chmod 755 /usr/local/bin/rdmlcd-show-splash.sh /usr/local/bin/rdmlcd-shutdown-splash.sh /usr/local/bin/rdmlcd-plugin-services.sh /usr/local/bin/rdmlcd-overlay.sh
 
 echo "Validating plugin before completing install..."
 
@@ -469,6 +500,16 @@ if grep -q 'dev-fb1\.device' /etc/systemd/system/rdmlcd-splash.service 2>/dev/nu
     cleanup_on_error
 fi
 
+if [ ! -x /usr/local/bin/rdmlcd-shutdown-splash.sh ]; then
+    echo "Error: rdmlcd-shutdown-splash.sh missing or not executable"
+    cleanup_on_error
+fi
+
+if ! grep -q 'onVolumioShutdown' "$PLUGIN_DIR/index.js" 2>/dev/null || ! grep -q 'onVolumioReboot' "$PLUGIN_DIR/index.js" 2>/dev/null; then
+    echo "Error: plugin must implement onVolumioShutdown/onVolumioReboot hooks"
+    cleanup_on_error
+fi
+
 echo "Install validation passed"
 
 echo "Creating sudoers entry for runtime configuration..."
@@ -479,6 +520,7 @@ cat > /etc/sudoers.d/volumio-user-raspdac-mini-lcd << 'SUDOERS'
 volumio ALL=(ALL) NOPASSWD: /usr/local/bin/rdmlcd-update-env.sh
 volumio ALL=(ALL) NOPASSWD: /usr/local/bin/rdmlcd-plugin-services.sh
 volumio ALL=(ALL) NOPASSWD: /usr/local/bin/rdmlcd-overlay.sh
+volumio ALL=(ALL) NOPASSWD: /usr/local/bin/rdmlcd-shutdown-splash.sh
 volumio ALL=(ALL) NOPASSWD: /bin/systemctl start rdmlcd.service
 volumio ALL=(ALL) NOPASSWD: /bin/systemctl stop rdmlcd.service
 volumio ALL=(ALL) NOPASSWD: /bin/systemctl restart rdmlcd.service

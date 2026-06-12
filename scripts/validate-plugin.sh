@@ -135,6 +135,89 @@ else
     pass "rdmlcd-shutdown.service shutdown.target"
 fi
 
+# Shutdown/reboot splash: canonical owner is the plugin's Volumio hooks
+if grep -q 'onVolumioShutdown' index.js 2>/dev/null && grep -q 'onVolumioReboot' index.js 2>/dev/null; then
+    pass "plugin implements onVolumioShutdown/onVolumioReboot hooks"
+else
+    fail "plugin must implement onVolumioShutdown and onVolumioReboot"
+fi
+
+if [ -f scripts/rdmlcd-shutdown-splash.sh ]; then
+    pass "scripts/rdmlcd-shutdown-splash.sh present"
+else
+    fail "missing scripts/rdmlcd-shutdown-splash.sh"
+fi
+
+# Shutdown splash helper must stop the compositor before painting (single owner)
+if grep -q 'stop rdmlcd.service' scripts/rdmlcd-shutdown-splash.sh 2>/dev/null; then
+    pass "shutdown-splash helper stops compositor first"
+else
+    fail "rdmlcd-shutdown-splash.sh must stop rdmlcd.service before painting"
+fi
+
+# Shutdown splash helper must reuse the shared splash writer (no duplicate write path)
+if grep -q 'rdmlcd-show-splash.sh' scripts/rdmlcd-shutdown-splash.sh 2>/dev/null; then
+    pass "shutdown-splash helper reuses rdmlcd-show-splash.sh"
+else
+    fail "rdmlcd-shutdown-splash.sh must reuse rdmlcd-show-splash.sh writer"
+fi
+
+# Compositor must NOT paint shutdown splash on SIGINT (retired duplicate painter)
+if grep -q 'printShutDownAndDie(false)' compositor/index.js 2>/dev/null; then
+    fail "compositor SIGINT must not call printShutDownAndDie (hook owns shutdown splash)"
+else
+    pass "compositor SIGINT does not repaint shutdown splash"
+fi
+
+if grep -q 'handleStopSignal' compositor/index.js 2>/dev/null; then
+    pass "compositor uses clean stop-signal handler"
+else
+    fail "compositor must use clean SIGINT/SIGTERM handler"
+fi
+
+# install.sh must install helper and authorize it via sudoers
+if grep -q 'rdmlcd-shutdown-splash.sh' install.sh 2>/dev/null; then
+    pass "install.sh installs shutdown-splash helper + sudoers"
+else
+    fail "install.sh must install and authorize rdmlcd-shutdown-splash.sh"
+fi
+
+# Plymouth splash painters must be masked on install and restored on uninstall
+if grep -q 'systemctl mask' install.sh 2>/dev/null && grep -q 'plymouth-poweroff.service' install.sh 2>/dev/null && grep -q 'plymouth-start.service' install.sh 2>/dev/null; then
+    pass "install.sh masks plymouth splash painters"
+else
+    fail "install.sh must mask plymouth splash painters (start/poweroff/reboot/halt/kexec)"
+fi
+
+if grep -q 'systemctl unmask' uninstall.sh 2>/dev/null && grep -q 'plymouth-poweroff.service' uninstall.sh 2>/dev/null && grep -q 'plymouth-start.service' uninstall.sh 2>/dev/null; then
+    pass "uninstall.sh restores plymouth splash painters"
+else
+    fail "uninstall.sh must unmask plymouth splash painters"
+fi
+
+# Must not mask plymouth infrastructure units (boot ordering / initramfs handoff)
+for infra in plymouth-quit-wait.service plymouth-read-write.service plymouth-switch-root.service; do
+    if grep -q "mask .*$infra" install.sh 2>/dev/null; then
+        fail "install.sh must NOT mask infrastructure unit $infra"
+    fi
+done
+pass "install.sh leaves plymouth infrastructure units intact"
+
+# Install must be able to compile if the prebuilt is missing/unextractable:
+# the compile path must install the build toolchain (else node-gyp: "not found: make")
+if grep -q 'Ensuring build toolchain' install.sh 2>/dev/null && grep -q 'build-essential' install.sh 2>/dev/null; then
+    pass "install.sh compile fallback installs build toolchain"
+else
+    fail "install.sh compile fallback must install build-essential (node-gyp needs make)"
+fi
+
+# Prebuilt must be staged via a clean temp dir (avoids tar directory-over-directory error)
+if grep -q 'PREBUILT_TMP' install.sh 2>/dev/null; then
+    pass "install.sh stages prebuilt via clean temp dir"
+else
+    fail "install.sh must extract prebuilt into a clean temp dir before merging"
+fi
+
 # Compositor must not use path before require
 if head -25 compositor/index.js | grep -q 'require("path")'; then
     pass "compositor/index.js path require order"
