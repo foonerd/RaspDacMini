@@ -1,8 +1,7 @@
 [Unit]
 Description=RaspDacMini LCD Display Service
 After=volumio.service
-Requires=volumio.service
-Wants=dev-fb1.device
+Wants=volumio.service
 
 [Service]
 Type=simple

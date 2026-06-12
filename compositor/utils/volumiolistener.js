@@ -12,7 +12,6 @@ function volumio_listener(host,refreshrate_ms){
     this.formatedMainString = "";
     this.data = {};
 	this.watchingIdle = false;
-	this.firstRequestConsumed = false;
 	this.listen();
 	this.iddle = false;
 	this._iddleTimeout = null;
@@ -155,13 +154,12 @@ volumio_listener.prototype.listen = function(){
 	this._socket.emit("getState");
 	
 	this._socket.on("pushState", (data)=>{ // Streamer state changes
-		if(!this.firstRequestConsumed){
-			this.firstRequestConsumed = true;
-			this._socket.emit("getState");
-			return;
-		}
 		this.compareData(data);
 		this.waiting = false;
+		if(!this.ready){
+			this.ready = true;
+			this.emit("ready", data);
+		}
 	})
 	this._socket.emit("getQueue");
 	this._socket.on("pushQueue", (resdata)=> {	// Playlist changes

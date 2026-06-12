@@ -15,7 +15,21 @@ if(!distro || !supported_distributions.includes(distro) ){
 }
 
 // Framebuffer device to receive the rendered screen image
+const fs = require("fs");
+const path = require("path");
 const targetBuffer = process.argv[3] || "/dev/fb1";
+const SPLASH_DIR = path.join(__dirname, "..", "assets", "splash");
+
+(function paintEarlyStartupSplash(){
+	const startingRaw = path.join(SPLASH_DIR, "starting.raw");
+	if(!fs.existsSync(startingRaw) || !fs.existsSync(targetBuffer)) return;
+	try {
+		fs.writeFileSync(targetBuffer, fs.readFileSync(startingRaw));
+		console.log("[Startup] Early splash: starting (phase=starting)");
+	} catch(e) {
+		console.warn("[Startup] Early splash failed:", e);
+	}
+})();
 
 
 // Listen for playback data from the current distribution
@@ -31,7 +45,6 @@ switch(distro){
 	break;
 }
 
-const fs = require("fs"); 
 const cp = require("child_process");
 const os = require("os");
 const http = require("http");
@@ -97,6 +110,7 @@ var scene = {
 var display = {
   redrawzones : []
 }
+var forceFullFrame = true;
 var mainMatrix =  new DOMMatrix([1,0,0,1,0,0]);	// Global matrix of main canvas (used for vertical scrolling)
 var busy = false;								// Indicates if stream is free to write data
 var last_ip = "";								// Last known IP address
@@ -467,6 +481,13 @@ streamer.on("seekChange", (data)=>{
   safeAddZone2Redraw( zone, scene.redrawzones );
 });
 
+streamer.on("ready", function(){
+	console.log("[Display] phase=ui-ready");
+	scene.need_redraw = true;
+	forceFullFrame = true;
+	if(bufwrite_interval) updateFB();
+});
+
 function get_filter(){
     daccontrol.getFilter().then(function(data){
         if(!data) return;
@@ -529,11 +550,10 @@ function monitor_ip(){
 	clear_ip();
 	scene_ctx.fillText( current_ipv4, x, y );
 	width = scene_ctx.measureText( current_ipv4 ).width;
-  
+	const zone = [x, y-fontsize, width, fontsize];
+	safeAddZone2Redraw(zone, scene.redrawzones);
 
-  
 	clear_ip=()=>{ 	
-    const zone =[x,y-fontsize,width,fontsize];
     scene_ctx.clearRect(...zone);   
     safeAddZone2Redraw(zone, scene.redrawzones);
   }
@@ -804,7 +824,12 @@ function updateFB(){
 	busy = true;
 
 	Vdraw();
-  
+
+	if(forceFullFrame){
+		display.redrawzones.push([0, 0, 320, 240]);
+		forceFullFrame = false;
+	}
+
   if(! display.redrawzones.length) return fbcb();
   display.redrawzones = [];
   
@@ -840,7 +865,45 @@ function fbcb(err,data){
 }
 
 
-function printShutDownAndDie(){
+function writeSplashFrame(frame){
+	const rawPath = path.join(SPLASH_DIR, frame + ".raw");
+	if(!fs.existsSync(rawPath)) return false;
+	try {
+		write(fs.readFileSync(rawPath));
+		return true;
+	} catch(e) {
+		console.warn("[Splash] Failed to write frame:", frame, e);
+		return false;
+	}
+}
+
+function stopBootSplashService(){
+	cp.exec("/bin/systemctl stop rdmlcd-splash.service", function(){});
+}
+
+function showLifecycleSplash(frame){
+	if(writeSplashFrame(frame)) {
+		console.log("[Splash] Displayed frame:", frame);
+		return;
+	}
+	const fontsize = 40;
+	ctx.clearRect(0, 0, 320, 240);
+	ctx.fillStyle = "white";
+	ctx.font = `${fontsize}px arial`;
+	ctx.textAlign = "center";
+	const label = frame === "reboot" ? "REBOOT" : "SHUTTING DOWN";
+	const lines = label.split(" ");
+	if(lines.length > 1){
+		ctx.fillText(lines[0], 320 / 2, 79);
+		ctx.fillText(lines.slice(1).join(" "), 320 / 2, 131);
+	} else {
+		ctx.fillText(label, 320 / 2, (fontsize + 240) / 2);
+	}
+	const buff = canvas.toBuffer("raw");
+	write(colorConvert.rgb888ToRgb565(buff));
+}
+
+function printShutDownAndDie(reboot){
 	[
 		bufwrite_interval,
 		getfilter_interval,
@@ -849,19 +912,10 @@ function printShutDownAndDie(){
 		getclock_interval
 	].forEach(clearInterval);
 	busy = true;
-	const fontsize = 40;
-	ctx.clearRect(0,0,320,240);
-	ctx.fillStyle = "white";
-	ctx.font = `${fontsize}px arial`;
-	ctx.textAlign = 'center';
-	ctx.fillText( "SHUTTING", 320/2, 79  );
-	ctx.fillText( "DOWN", 320/2, 131  );
-	const buff = canvas.toBuffer("raw");
-	const converted = colorConvert.rgb888ToRgb565(buff);
-  streamFile.uncork();
-	write(converted );
-  streamFile.destroy();
-  process.exit(0);
+	showLifecycleSplash(reboot ? "reboot" : "shutdown");
+	streamFile.uncork();
+	streamFile.destroy();
+	process.exit(0);
 }
 
 
@@ -870,17 +924,11 @@ const streamFile = fs.createWriteStream(targetBuffer);
   process.exit()
 })
 
-// Show startup message
-ctx.fillStyle = "black";
-ctx.fillRect(0, 0, 320, 240);
-ctx.fillStyle = "white";
-ctx.font = "24px sans-serif";
-ctx.textAlign = "center";
-ctx.fillText("Starting...", 160, 120);
-const buff = canvas.toBuffer("raw");
-const converted = colorConvert.rgb888ToRgb565(buff);
-streamFile.write(converted);
-console.log("[Startup] Displayed startup message");
+stopBootSplashService();
+
+process.on("SIGINT", function(){
+	printShutDownAndDie(false);
+});
 
 
 // Read sleep timeout configuration
