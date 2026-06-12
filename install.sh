@@ -321,6 +321,7 @@ User=root
 WorkingDirectory=/data/plugins/system_hardware/raspdac_mini_lcd/compositor
 Environment="SLEEP_AFTER=900"
 ExecStartPre=/bin/sh -c 'until [ -e /dev/fb1 ]; do sleep 1; done'
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 90); do curl -sf -o /dev/null --connect-timeout 1 http://127.0.0.1:3000/ && exit 0; sleep 1; done; echo "Volumio API not ready"; exit 1'
 TimeoutStartSec=0
 ExecStart=/usr/bin/node index.js volumio /dev/fb1
 StandardOutput=journal

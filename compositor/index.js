@@ -111,6 +111,8 @@ var display = {
   redrawzones : []
 }
 var forceFullFrame = true;
+var firstFrameWritten = false;
+var pendingFullRedraw = false;
 var mainMatrix =  new DOMMatrix([1,0,0,1,0,0]);	// Global matrix of main canvas (used for vertical scrolling)
 var busy = false;								// Indicates if stream is free to write data
 var last_ip = "";								// Last known IP address
@@ -132,6 +134,30 @@ var DEBOUNCE_MS = 1500;
 
 // Default values that can be overridden by placing a config file in the same folder
 var TIME_BEFORE_DEEPSLEEP = 900000; // in ms
+
+if(process.env.SLEEP_AFTER){
+	try {
+		var sleep_seconds = parseInt(process.env.SLEEP_AFTER);
+		if(!isNaN(sleep_seconds) && sleep_seconds >= 0){
+			TIME_BEFORE_DEEPSLEEP = sleep_seconds * 1000;
+			console.log("[Config] Using SLEEP_AFTER from environment:", sleep_seconds, "seconds");
+		}
+	} catch(e) {
+		console.log("[Config] Invalid SLEEP_AFTER environment variable, using default");
+	}
+}
+
+const streamFile = fs.createWriteStream(targetBuffer);
+streamFile.on("error", (e) => {
+	console.warn(e);
+	process.exit();
+});
+
+stopBootSplashService();
+
+process.on("SIGINT", function(){
+	printShutDownAndDie(false);
+});
 
 
 // Utility to add leading zeros to a string
@@ -481,11 +507,14 @@ streamer.on("seekChange", (data)=>{
   safeAddZone2Redraw( zone, scene.redrawzones );
 });
 
+streamer.on("connect", function(){
+	console.log("[Display] volumio-socket-connect");
+	requestFullRedraw();
+});
+
 streamer.on("ready", function(){
 	console.log("[Display] phase=ui-ready");
-	scene.need_redraw = true;
-	forceFullFrame = true;
-	if(bufwrite_interval) updateFB();
+	requestFullRedraw();
 });
 
 function get_filter(){
@@ -588,6 +617,31 @@ getclock_interval = setInterval(monitor_clock, 1000*30);
 updateRepeatIcon(scene_ctx, 226, 3, 12, 12, false);
 updateShuffleIcon(scene_ctx, 242, 3, 12, 12, false);
 
+paintDefaultBackground();
+
+function paintDefaultBackground(){
+	const logoPath = path.join(SPLASH_DIR, "volumio-logo.png");
+	coverctx.fillStyle = "black";
+	coverctx.fillRect(0, 0, 320, 240);
+	if(!fs.existsSync(logoPath)){
+		cover.need_redraw = true;
+		return;
+	}
+	loadImage(logoPath).then(function(img){
+		updateCover(img, logoPath);
+		requestFullRedraw();
+	}).catch(function(err){
+		console.warn("[Display] Default background failed:", err);
+		cover.need_redraw = true;
+	});
+}
+
+function requestFullRedraw(){
+	scene.need_redraw = true;
+	forceFullFrame = true;
+	if(!busy) updateFB();
+	else pendingFullRedraw = true;
+}
 
 function soft_exit_sleep(){
 	try{streamer.resetIdleTimeout()}
@@ -602,6 +656,10 @@ function server( req,res ){
 		param = _url[1] || "?";
 		param = decodeURIComponent(param);
 	switch(cmd){
+
+		case("display-ready"):
+			res.end(firstFrameWritten ? "1" : "0");
+		break;
 		
 		case("switch_view"): 
 			soft_exit_sleep();
@@ -820,7 +878,10 @@ function safeAddZone2Redraw(zone, list){
 
 function updateFB(){
 
-	if(busy) return panicmeter.registerError();
+	if(busy){
+		pendingFullRedraw = true;
+		return panicmeter.registerError();
+	}
 	busy = true;
 
 	Vdraw();
@@ -830,27 +891,29 @@ function updateFB(){
 		forceFullFrame = false;
 	}
 
-  if(! display.redrawzones.length) return fbcb();
-  display.redrawzones = [];
-  
-  // console.log("draw")
-  
- 
-	const buff = canvas.toBuffer("raw");
+	if(!display.redrawzones.length) return fbcb();
+	display.redrawzones = [];
 
-  const converted = colorConvert.rgb888ToRgb565(buff);
-  
-    streamFile.cork()
-    write(converted);
-    process.nextTick(() =>{
-    streamFile.uncork();
-     process.nextTick(()=>{
-       fbcb()
-     })
-    
-  });
-  
-  
+	const buff = canvas.toBuffer("raw");
+	const converted = colorConvert.rgb888ToRgb565(buff);
+
+	if(!firstFrameWritten){
+		try {
+			fs.writeFileSync(targetBuffer, converted);
+			firstFrameWritten = true;
+			console.log("[Display] first-frame-written");
+			return fbcb();
+		} catch(e) {
+			console.warn("[Display] Sync first frame failed, using stream:", e);
+		}
+	}
+
+	streamFile.cork();
+	write(converted);
+	process.nextTick(() => {
+		streamFile.uncork();
+		process.nextTick(() => fbcb());
+	});
 }
 
 function write(buff){
@@ -859,9 +922,14 @@ function write(buff){
 }
 
 function fbcb(err,data){
-  // console.timeEnd("display")
 	busy = false;
-	if ( err ) console.warn( err, data );
+	if(err) console.warn(err, data);
+	if(pendingFullRedraw){
+		pendingFullRedraw = false;
+		forceFullFrame = true;
+		scene.need_redraw = true;
+		process.nextTick(updateFB);
+	}
 }
 
 
@@ -918,81 +986,55 @@ function printShutDownAndDie(reboot){
 	process.exit(0);
 }
 
-
-const streamFile = fs.createWriteStream(targetBuffer);
-  streamFile.on('error', (e)=>{console.warn(e);
-  process.exit()
-})
-
-stopBootSplashService();
-
-process.on("SIGINT", function(){
-	printShutDownAndDie(false);
-});
-
-
-// Read sleep timeout configuration
-// Priority: 1) Environment variable (from systemd service)
-//           2) Config file (for standalone testing)
-//           3) Default value (900 seconds)
-var TIME_BEFORE_DEEPSLEEP = 900000; // default in ms
-
-// Check environment variable first (Volumio plugin integration)
-if (process.env.SLEEP_AFTER) {
-	try {
-		var sleep_seconds = parseInt(process.env.SLEEP_AFTER);
-		if (!isNaN(sleep_seconds) && sleep_seconds >= 0) {
-			TIME_BEFORE_DEEPSLEEP = sleep_seconds * 1000;
-			console.log("[Config] Using SLEEP_AFTER from environment:", sleep_seconds, "seconds");
-		}
-	} catch(e) {
-		console.log("[Config] Invalid SLEEP_AFTER environment variable, using default");
-	}
+function startDisplayLoop(){
+	if(bufwrite_interval) return;
+	console.log("[Display] loop-start");
+	streamer.watchIdleState(TIME_BEFORE_DEEPSLEEP);
+	bufwrite_interval = setInterval(updateFB, UPDATE_INTERVAL);
+	requestFullRedraw();
 }
 
-// Try to read config file (for standalone testing or moOde compatibility)
-fs.readFile("config.json",(err,data)=>{
+streamer.on("iddleStart", function(){
+	clearInterval(bufwrite_interval);
+	bufwrite_interval = null;
+	const blank = Buffer.alloc(320 * 240 * 2);
+	blank.fill(0x00);
+	busy = true;
+	streamFile.cork();
+	write(blank);
+	streamFile.uncork();
+	busy = false;
+});
+
+streamer.on("iddleStop", function(){
+	if(bufwrite_interval) clearInterval(bufwrite_interval);
+	bufwrite_interval = setInterval(updateFB, UPDATE_INTERVAL);
+	requestFullRedraw();
+});
+
+startDisplayLoop();
+
+// Optional config file (moOde / standalone); sleep timeout comes from systemd env on Volumio
+fs.readFile("config.json", (err, data) => {
 	if(err) {
-		if (!process.env.SLEEP_AFTER) {
+		if(!process.env.SLEEP_AFTER) {
 			console.log("[Config] Cannot read config file. Using default settings.");
 		}
-	}
-	else{
-		try { 
-			data = JSON.parse( data.toString() );
-			// Only use config file if environment variable not set
-			if (!process.env.SLEEP_AFTER && data.sleep_after && data.sleep_after.value) {
+	} else {
+		try {
+			data = JSON.parse(data.toString());
+			if(!process.env.SLEEP_AFTER && data.sleep_after && data.sleep_after.value) {
 				TIME_BEFORE_DEEPSLEEP = (data.sleep_after.value * 1000) || TIME_BEFORE_DEEPSLEEP;
 				console.log("[Config] Using sleep_after from config.json:", data.sleep_after.value, "seconds");
 			}
-		
-		} catch(e){
-			if (!process.env.SLEEP_AFTER) {
+		} catch(e) {
+			if(!process.env.SLEEP_AFTER) {
 				console.log("[Config] Cannot parse config file. Using default settings.");
 			}
 		}
 	}
-	
 	console.log("[Config] Final SLEEP_AFTER value:", TIME_BEFORE_DEEPSLEEP / 1000, "seconds");
-	streamer.watchIdleState(TIME_BEFORE_DEEPSLEEP);
-	bufwrite_interval = setInterval(updateFB, UPDATE_INTERVAL)
-
-	streamer.on("iddleStart", function(){
-		clearInterval(bufwrite_interval);
-		buff = Buffer.alloc(320*240*2);
-		buff.fill(0x00);
-    busy = true;
-    streamFile.cork();
-		write( buff );
-    streamFile.uncork();
-    busy = false;
-    
-	});
-	streamer.on("iddleStop", function(){
-		clearInterval(bufwrite_interval);
-		bufwrite_interval = setInterval(updateFB, UPDATE_INTERVAL)
-	});
-
+	if(bufwrite_interval) streamer.watchIdleState(TIME_BEFORE_DEEPSLEEP);
 });
 
 

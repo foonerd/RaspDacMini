@@ -106,6 +106,22 @@ if grep -q 'boot\.raw' compositor/index.js 2>/dev/null; then
     fail "compositor must not write boot.raw (boot service owns Booting phase)"
 fi
 
+if ! grep -q 'first-frame-written' compositor/index.js 2>/dev/null; then
+    fail "compositor must log first-frame-written after initial UI paint"
+else
+    pass "compositor first-frame-written log"
+fi
+
+if ! grep -q 'loop-start' compositor/index.js 2>/dev/null; then
+    fail "compositor must log loop-start when UI interval begins"
+else
+    pass "compositor display loop-start log"
+fi
+
+if grep -q 'if(bufwrite_interval) updateFB' compositor/index.js 2>/dev/null; then
+    fail "compositor must not gate updateFB on bufwrite_interval in ready handler"
+fi
+
 # Shutdown splash must NOT activate at boot
 if grep -q 'WantedBy=multi-user.target' compositor/service/rdmlcd-shutdown.service 2>/dev/null; then
     fail "rdmlcd-shutdown.service must not use WantedBy=multi-user.target"
