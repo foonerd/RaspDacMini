@@ -4,7 +4,6 @@ var libQ = require('kew');
 var fs = require('fs-extra');
 var config = new (require('v-conf'))();
 var exec = require('child_process').exec;
-var execSync = require('child_process').execSync;
 
 module.exports = raspdacMiniLCD;
 
@@ -34,31 +33,28 @@ raspdacMiniLCD.prototype.onStart = function() {
 
     self.logger.info('[RaspDacMini LCD] Starting plugin');
 
-    // Warn if framebuffer device is not currently present, but still start the service.
-    if (!self.checkFramebuffer()) {
-        self.logger.warn('[RaspDacMini LCD] Framebuffer /dev/fb1 not found at plugin startup; starting service anyway so device may be found later.');
+    var startChain = libQ.resolve();
+    if (self.needsDisplay()) {
+        startChain = self.ensureOverlayLoaded()
+            .then(function() {
+                return self.waitForFramebuffer(15, 1000);
+            });
     }
 
-    // Check if LCD is enabled in config
-    if (!self.config.get('lcd_active')) {
-        self.logger.info('[RaspDacMini LCD] LCD is disabled in configuration');
-        defer.resolve();
-        return defer.promise;
-    }
-
-    // Wait for the framebuffer device to become available before starting the service.
-    self.waitForFramebuffer(10, 1000)
+    startChain
         .then(function() {
-            return self.systemctl('start', 'rdmlcd.service');
+            return self.syncPluginServices(true);
         })
         .then(function() {
-            self.logger.info('[RaspDacMini LCD] Service started successfully');
-            self.commandRouter.pushToastMessage('success', 'RaspDacMini LCD', 'Display service started');
+            self.logger.info('[RaspDacMini LCD] Plugin services synced');
+            if (self.config.get('lcd_active')) {
+                self.commandRouter.pushToastMessage('success', 'RaspDacMini LCD', 'Display service started');
+            }
             defer.resolve();
         })
         .fail(function(error) {
-            self.logger.error('[RaspDacMini LCD] Failed to start service: ' + error);
-            self.commandRouter.pushToastMessage('error', 'RaspDacMini LCD', 'Failed to start display service');
+            self.logger.error('[RaspDacMini LCD] Failed to start plugin services: ' + error);
+            self.commandRouter.pushToastMessage('error', 'RaspDacMini LCD', 'Failed to start display services');
             defer.reject(error);
         });
 
@@ -71,15 +67,13 @@ raspdacMiniLCD.prototype.onStop = function() {
 
     self.logger.info('[RaspDacMini LCD] Stopping plugin');
 
-    // Stop the compositor service
-    self.systemctl('stop', 'rdmlcd.service')
+    self.syncPluginServices(false)
         .then(function() {
-            self.logger.info('[RaspDacMini LCD] Service stopped successfully');
+            self.logger.info('[RaspDacMini LCD] Plugin services stopped');
             defer.resolve();
         })
         .fail(function(error) {
-            self.logger.error('[RaspDacMini LCD] Failed to stop service: ' + error);
-            // Resolve anyway to allow plugin to stop
+            self.logger.error('[RaspDacMini LCD] Failed to stop plugin services: ' + error);
             defer.resolve();
         });
 
@@ -88,10 +82,9 @@ raspdacMiniLCD.prototype.onStop = function() {
 
 raspdacMiniLCD.prototype.onRestart = function() {
     var self = this;
-    
+
     self.logger.info('[RaspDacMini LCD] Restarting plugin');
-    
-    // Stop then start
+
     self.onStop()
         .then(function() {
             return self.onStart();
@@ -100,12 +93,12 @@ raspdacMiniLCD.prototype.onRestart = function() {
 
 raspdacMiniLCD.prototype.onInstall = function() {
     var self = this;
-    // Placeholder: Handled by install.sh
+    // Handled by install.sh
 };
 
 raspdacMiniLCD.prototype.onUninstall = function() {
     var self = this;
-    // Placeholder: Handled by uninstall.sh
+    // Handled by uninstall.sh
 };
 
 raspdacMiniLCD.prototype.getUIConfig = function() {
@@ -118,9 +111,9 @@ raspdacMiniLCD.prototype.getUIConfig = function() {
         __dirname + '/i18n/strings_en.json',
         __dirname + '/UIConfig.json')
         .then(function(uiconf) {
-            // Placeholder: Load current config values into UI
             uiconf.sections[0].content[0].value = self.config.get('lcd_active');
-            uiconf.sections[0].content[1].value = self.config.get('sleep_after');
+            uiconf.sections[0].content[1].value = self.getBootSplashEnabled();
+            uiconf.sections[0].content[2].value = self.config.get('sleep_after');
 
             defer.resolve(uiconf);
         })
@@ -137,7 +130,6 @@ raspdacMiniLCD.prototype.getConfigurationFiles = function() {
 
 raspdacMiniLCD.prototype.setUIConfig = function(data) {
     var self = this;
-    // Placeholder: Implementation needed
 };
 
 /* Configuration Methods */
@@ -148,22 +140,25 @@ raspdacMiniLCD.prototype.updateLCDConfig = function(data) {
 
     self.logger.info('[RaspDacMini LCD] Updating configuration');
 
-    // Save configuration
     self.config.set('lcd_active', data['lcd_active']);
+    self.config.set('boot_splash', data['boot_splash']);
     self.config.set('sleep_after', data['sleep_after']);
 
-    // Update service environment file
     self.updateServiceEnvironment()
         .then(function() {
-            // Restart service if LCD is active
-            if (data['lcd_active']) {
-                return self.systemctl('restart', 'rdmlcd.service');
-            } else {
-                return self.systemctl('stop', 'rdmlcd.service');
+            if (self.needsDisplay()) {
+                return self.ensureOverlayLoaded()
+                    .then(function() {
+                        return self.waitForFramebuffer(15, 1000);
+                    });
             }
+            return libQ.resolve();
         })
         .then(function() {
-            self.commandRouter.pushToastMessage('success', 'RaspDacMini LCD', 'Configuration saved and service restarted');
+            return self.syncPluginServices(true);
+        })
+        .then(function() {
+            self.commandRouter.pushToastMessage('success', 'RaspDacMini LCD', 'Configuration saved and services updated');
             defer.resolve();
         })
         .fail(function(error) {
@@ -187,9 +182,14 @@ raspdacMiniLCD.prototype.restartLCD = function() {
         return defer.promise;
     }
 
-    self.commandRouter.pushToastMessage('info', 'RaspDacMini LCD', 'Restarting display service...');
-
-    self.systemctl('restart', 'rdmlcd.service')
+    self.ensureOverlayLoaded()
+        .then(function() {
+            return self.waitForFramebuffer(15, 1000);
+        })
+        .then(function() {
+            self.commandRouter.pushToastMessage('info', 'RaspDacMini LCD', 'Restarting display service...');
+            return self.systemctl('restart', 'rdmlcd.service');
+        })
         .then(function() {
             self.logger.info('[RaspDacMini LCD] Service restarted successfully');
             self.commandRouter.pushToastMessage('success', 'RaspDacMini LCD', 'Display service restarted');
@@ -206,18 +206,83 @@ raspdacMiniLCD.prototype.restartLCD = function() {
 
 /* Helper Methods */
 
+raspdacMiniLCD.prototype.needsDisplay = function() {
+    return this.config.get('lcd_active') || this.getBootSplashEnabled();
+};
+
+raspdacMiniLCD.prototype.ensureOverlayLoaded = function() {
+    var self = this;
+    var defer = libQ.defer();
+
+    if (self.checkFramebuffer()) {
+        defer.resolve();
+        return defer.promise;
+    }
+
+    self.logger.info('[RaspDacMini LCD] Framebuffer missing, loading device tree overlay');
+
+    exec('/usr/bin/sudo /usr/local/bin/rdmlcd-overlay.sh load', {uid: 1000, gid: 1000}, function(error, stdout, stderr) {
+        if (stdout) {
+            self.logger.info('[RaspDacMini LCD] ' + stdout.trim());
+        }
+        if (error) {
+            self.logger.error('[RaspDacMini LCD] Failed to load overlay: ' + (stderr || error));
+            defer.reject(new Error('Failed to load LCD device tree overlay'));
+        } else {
+            defer.resolve();
+        }
+    });
+
+    return defer.promise;
+};
+
+raspdacMiniLCD.prototype.getBootSplashEnabled = function() {
+    var value = this.config.get('boot_splash');
+    if (value === undefined || value === null) {
+        return true;
+    }
+    return value === true || value === 'true' || value === 1;
+};
+
+raspdacMiniLCD.prototype.syncPluginServices = function(pluginEnabled) {
+    var self = this;
+    var defer = libQ.defer();
+
+    var command;
+    if (!pluginEnabled) {
+        command = '/usr/bin/sudo /usr/local/bin/rdmlcd-plugin-services.sh disable-all';
+    } else {
+        var bootSplash = self.getBootSplashEnabled() ? '1' : '0';
+        var lcdActive = self.config.get('lcd_active') ? '1' : '0';
+        command = '/usr/bin/sudo /usr/local/bin/rdmlcd-plugin-services.sh sync ' + bootSplash + ' ' + lcdActive;
+    }
+
+    exec(command, {uid: 1000, gid: 1000}, function(error, stdout, stderr) {
+        if (error) {
+            self.logger.error('[RaspDacMini LCD] syncPluginServices failed: ' + error);
+            defer.reject(error);
+        } else {
+            if (stdout) {
+                self.logger.info('[RaspDacMini LCD] ' + stdout.trim());
+            }
+            defer.resolve();
+        }
+    });
+
+    return defer.promise;
+};
+
 raspdacMiniLCD.prototype.checkFramebuffer = function() {
     var self = this;
-    
+
     try {
         var fbExists = fs.existsSync('/dev/fb1');
         if (fbExists) {
             self.logger.info('[RaspDacMini LCD] Framebuffer /dev/fb1 detected');
             return true;
-        } else {
-            self.logger.error('[RaspDacMini LCD] Framebuffer /dev/fb1 not found');
-            return false;
         }
+        self.logger.error('[RaspDacMini LCD] Framebuffer /dev/fb1 not found');
+        return false;
     } catch (error) {
         self.logger.error('[RaspDacMini LCD] Error checking framebuffer: ' + error);
         return false;
@@ -257,7 +322,6 @@ raspdacMiniLCD.prototype.updateServiceEnvironment = function() {
 
     self.logger.info('[RaspDacMini LCD] Updating service environment: SLEEP_AFTER=' + sleep_after);
 
-    // Use helper script to update service environment (handles mkdir, write, daemon-reload)
     exec('/usr/bin/sudo /usr/local/bin/rdmlcd-update-env.sh ' + sleep_after, {uid: 1000, gid: 1000}, function(error, stdout, stderr) {
         if (error) {
             self.logger.error('[RaspDacMini LCD] Failed to update service environment: ' + error);
@@ -275,7 +339,6 @@ raspdacMiniLCD.prototype.systemctl = function(cmd, service) {
     var self = this;
     var defer = libQ.defer();
 
-    // Placeholder: Implementation needed
     var command = '/usr/bin/sudo /bin/systemctl ' + cmd + ' ' + service;
 
     exec(command, {uid: 1000, gid: 1000}, function(error, stdout, stderr) {
